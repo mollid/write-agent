@@ -1,0 +1,21 @@
+# Specs — 不纳入版本控制（按用户要求）
+docs/superpowers/specs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# 环境与密钥
+.env
+.env.*
+*.key
+
+# 编辑器/系统
+.idea/
+.vscode/
+.DS_Store
