@@ -58,6 +58,7 @@ def _demo_provider() -> ModelProvider:
         "writer": "Ara stepped into the tavern. The thief's work was about to begin.",
         "continuity": "[]", "editor": "Ara stepped into the tavern.",
         "scorer": passing,
+        "extractor": {"character_states": {}, "voice_samples": {}, "mannerisms_used": {}, "events": []},
     }, tag_key="agent")
 
 
@@ -99,7 +100,8 @@ def premise(text: str, project: Path | None = _project_opt) -> None:
 
 
 @app.command(name="write-chapter")
-def write_chapter(n: int = 1, project: Path | None = _project_opt) -> None:
+def write_chapter(n: int = typer.Argument(1, help="number of chapters to write"),
+                  project: Path | None = _project_opt) -> None:
     """Write the next N chapters end-to-end (demo or live)."""
     proj = _load_project(project)
     cfg = load_config(proj.config_path)
@@ -110,10 +112,14 @@ def write_chapter(n: int = 1, project: Path | None = _project_opt) -> None:
     cfg_map = {name: cfg.model_for(name) for name in
                ["strategist", "worldbuilder", "character", "outliner", "writer",
                 "continuity", "editor", "scorer", "extractor"]}
+    existing = sorted((proj.root / "chapters").glob("[0-9][0-9][0-9].md"))
+    start_chapter = int(existing[-1].stem) + 1 if existing else 1
     run_full_pipeline(provider=provider, cfg_map=cfg_map, bible=bible, vector=vector,
-                      proj=proj, premise=bible.get_concept().logline, target_chapters=n,
+                      proj=proj, premise=bible.get_concept().logline,
+                      target_chapters=start_chapter - 1 + n, start_chapter=start_chapter,
                       score_min=cfg.thresholds.score_min, max_retries=cfg.thresholds.max_retries,
-                      token_budget=cfg.generation.context_token_budget)
+                      token_budget=cfg.generation.context_token_budget,
+                      on_gate=_gate if os.environ.get("NOVEL_LIVE") == "1" else None)
     console.print(f"[green]Wrote {n} chapter(s).[/green]")
 
 

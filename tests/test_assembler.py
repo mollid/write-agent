@@ -6,6 +6,8 @@ from novel.models import (
     Character,
     CharacterState,
     Concept,
+    Event,
+    Foreshadow,
     Mannerism,
     Outline,
     World,
@@ -42,3 +44,11 @@ def test_assemble_respects_token_budget_and_records_drops(tmp_path):
     ctx = assemble_context(beat=beat, bible=b, vector=vm, proj=proj, token_budget=20)
     assert ctx.tokens <= 20 or ctx.dropped  # either fits or something dropped
     assert estimate_tokens("x" * 300) == 100
+
+def test_assemble_includes_events_and_threads(tmp_path):
+    proj, b, vm, beat = _seed(tmp_path)
+    b.append_event(Event(id="e1", chapter=1, summary="the bell rings"))
+    b.add_foreshadow(Foreshadow(id="plant-the bell rings", description="the bell rings", planted_ch=1))
+    ctx = assemble_context(beat=beat, bible=b, vector=vm, proj=proj, token_budget=4000)
+    assert "the bell rings" in ctx.text   # event json + thread line
+    assert "planted ch1" in ctx.text      # thread line for the OPEN foreshadow

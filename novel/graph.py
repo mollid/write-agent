@@ -15,7 +15,7 @@ from novel.agents.writer import WriterAgent
 from novel.config import ModelConfig
 from novel.memory.assembler import assemble_context
 from novel.memory.extractor import extract_updates
-from novel.models import ReviewScore
+from novel.models import Foreshadow, ForeshadowStatus, Mannerism, ReviewScore
 from novel.project import NovelProject
 from novel.providers import ModelProvider
 from novel.scorer_rubrics import apply_review, decide
@@ -44,30 +44,40 @@ def run_full_pipeline(
     *, provider: ModelProvider, cfg_map: dict[str, ModelConfig], bible: StoryBible,
     vector: VectorMemory, proj: NovelProject, premise: str, target_chapters: int,
     score_min: int = 80, max_retries: int = 3, token_budget: int = 24000,
-    on_gate: Callable[[str, object], None] | None = None,
+    start_chapter: int = 1,
+    on_gate: Callable[[str, object], bool] | None = None,
 ) -> PipelineState:
     state = PipelineState(premise=premise)
 
     def agent(name: str) -> ModelConfig:
         return cfg_map[name]
 
-    # --- SETUP ---
-    concept = StrategistAgent(provider, agent("strategist")).run(premise)
-    bible.set_concept(concept)
-    world = WorldbuilderAgent(provider, agent("worldbuilder")).run(concept)
-    bible.set_world(world)
-    chars = CharacterAgent(provider, agent("character")).run((concept, world))
-    for ch in chars:
-        bible.upsert_character(ch)
-    outline = OutlinerAgent(provider, agent("outliner")).run((concept, world, chars))
-    bible.set_outline(outline)
-    if on_gate:
-        on_gate("outline", outline)
+    if start_chapter <= 1:
+        # --- SETUP ---
+        concept = StrategistAgent(provider, agent("strategist")).run(premise)
+        bible.set_concept(concept)
+        world = WorldbuilderAgent(provider, agent("worldbuilder")).run(concept)
+        bible.set_world(world)
+        chars = CharacterAgent(provider, agent("character")).run((concept, world))
+        for ch in chars:
+            bible.upsert_character(ch)
+        outline = OutlinerAgent(provider, agent("outliner")).run((concept, world, chars))
+        bible.set_outline(outline)
+        if on_gate:
+            on_gate("outline", outline)
+        chapter_no = 0
+    else:
+        # --- RESUME: skip SETUP, load persisted bible state ---
+        _outline = bible.get_outline()
+        assert _outline is not None, "no outline to resume from"
+        outline = _outline
+        concept = bible.get_concept()
+        premise = premise or concept.logline
+        chapter_no = start_chapter - 1
 
     scorer = ScorerAgent(provider, agent("scorer"))
 
     # --- GENERATION ---
-    chapter_no = 0
     for arc in outline.arcs:
         for ch_out in arc.chapters:
             chapter_no += 1
@@ -81,16 +91,25 @@ def run_full_pipeline(
             prose = writer.run(ctx)
             # scorer loop on chapter
             attempt = 1
+            final_ok = False
             while True:
                 ok, rs = _scored(prose, "chapter",
                                  json.dumps({"prose": prose, "beat": beat.model_dump()}, ensure_ascii=False),
                                  scorer, score_min, max_retries, attempt)
                 state.last_review = rs
-                if ok or attempt >= max_retries:
+                if ok:
+                    final_ok = True
+                    break
+                if attempt >= max_retries:
                     break
                 feedback = apply_review(rs, prose)
                 prose = writer.run(type(ctx)(blocks=ctx.blocks + [f"[REWRITE NOTES] {feedback}"]))
                 attempt += 1
+            if not final_ok:
+                approved = on_gate("chapter_review_failed", rs) if on_gate else False
+                if not approved:
+                    state.error = f"chapter {chapter_no} rejected after {max_retries} attempts"
+                    continue
             # continuity
             issues = ContinuityAgent(provider, agent("continuity")).run(
                 (prose, json.dumps(proj.load_canonical(), ensure_ascii=False)))
@@ -108,9 +127,38 @@ def run_full_pipeline(
                 if ch_obj:
                     ch_obj.state = st
                     bible.upsert_character(ch_obj)
+            for cid, sample in upd.voice_samples.items():
+                ch_obj = bible.get_character(cid)
+                if ch_obj:
+                    ch_obj.voice_fingerprint[f"sample_{chapter_no}"] = sample
+                    bible.upsert_character(ch_obj)
+            for cid, mannerism_text in upd.mannerisms_used.items():
+                ch_obj = bible.get_character(cid)
+                if ch_obj:
+                    existing = next((m for m in ch_obj.mannerisms if m.text == mannerism_text), None)
+                    if existing:
+                        existing.used_count += 1
+                    else:
+                        ch_obj.mannerisms.append(Mannerism(text=mannerism_text, used_count=1))
+                    bible.upsert_character(ch_obj)
             for e in upd.events:
                 bible.append_event(e)
+            # register foreshadowing from the beat
+            for plant in beat.plants:
+                fid = f"plant-{plant}"
+                if not any(f.id == fid for f in bible.list_foreshadow()):
+                    bible.add_foreshadow(Foreshadow(id=fid, description=plant, planted_ch=chapter_no))
+            for payoff in beat.payoffs:
+                open_fs = [f for f in bible.list_foreshadow()
+                           if f.status == ForeshadowStatus.OPEN
+                           and (payoff in f.description or f.description in payoff)]
+                if open_fs:
+                    target = open_fs[0]
+                    bible.add_foreshadow(Foreshadow(
+                        id=target.id, description=target.description,
+                        planted_ch=target.planted_ch, payoff_ch=chapter_no,
+                        status=ForeshadowStatus.PAID_OFF))
             vector.add_summary("chapter", f"ch{chapter_no}", prose[:300])
-            if on_gate and chapter_no % 1 == 0:
+            if on_gate:
                 on_gate("chapter", chapter_no)
     return state

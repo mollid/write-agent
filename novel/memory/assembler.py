@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from novel.models import ChapterBeat
+from novel.models import ChapterBeat, ForeshadowStatus
 from novel.project import NovelProject
 from novel.store.bible import StoryBible
 from novel.store.vector import VectorMemory
@@ -48,12 +48,19 @@ def assemble_context(
     world = bible.get_world()
     world_block = f"[World] {world.model_dump_json() if world else ''}"
     recency_block = "\n".join(vector.retrieve(beat.event, k=2)) if beat.event else ""
+    events_block = "\n".join(e.model_dump_json() for e in bible.list_events()[-3:])
+    threads_block = "\n".join(
+        f"- {f.description} (planted ch{f.planted_ch})"
+        for f in bible.list_foreshadow() if f.status != ForeshadowStatus.PAID_OFF
+    )
 
-    # priority order: beats > bible(world+character) > recency > retrieved(extra)
+    # priority order: beats > bible(world+character+events+threads) > recency > retrieved(extra)
     candidates = [
         ("beat", beat_block),
         ("world", world_block),
         ("characters", char_block),
+        ("events", events_block),
+        ("threads", threads_block),
         ("recency", recency_block),
     ]
     ctx = AssembledContext()
