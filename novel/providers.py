@@ -29,6 +29,13 @@ def _agent_tag(messages: list[dict[str, object]], tag_key: str) -> str:
     raise KeyError(f"no agent tag '{tag_key}' in messages")
 
 
+def _jsonable(obj: object) -> object:
+    """Coerce Pydantic models (nested in dict/list) into JSON-serializable forms."""
+    if isinstance(obj, BaseModel):
+        return json.loads(obj.model_dump_json())
+    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
+
 class FakeProvider:
     """Deterministic provider for tests. Responses keyed by agent name in messages."""
 
@@ -44,7 +51,7 @@ class FakeProvider:
         if isinstance(val, str):
             return val
         if isinstance(val, (dict, list)):
-            return json.dumps(val, ensure_ascii=False)
+            return json.dumps(val, default=_jsonable, ensure_ascii=False)
         return str(val)
 
     def complete_structured(
