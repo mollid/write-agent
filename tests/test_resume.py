@@ -261,6 +261,7 @@ def test_complete_chapters_skipped_on_rerun(tmp_path):
     skips = [e for e in events if e["type"] == "chapter_skipped"]
     assert [e["chapter"] for e in skips] == [1, 2, 3]
     assert all(e["reason"] == "already complete" for e in skips)
+    assert not [e for e in events if e["type"] in ("chapter_start", "chapter_done")]
 
 
 def test_pipeline_rewrites_invalid_hole(tmp_path):
@@ -276,6 +277,58 @@ def test_pipeline_rewrites_invalid_hole(tmp_path):
     skips = [e for e in events if e["type"] == "chapter_skipped"]
     assert [e["chapter"] for e in skips] == [3]  # chapter 3 untouched
     assert list((proj.root / "chapters").glob("*.tmp")) == []
+
+
+def test_human_overridden_chapter_counts_as_complete(tmp_path):
+    from novel import graph
+    from novel.models import (
+        Arc,
+        ChapterBeat,
+        ChapterOutline,
+        Character,
+        Concept,
+        DimensionScore,
+        Outline,
+        ReviewScore,
+        World,
+    )
+    from novel.providers import FakeProvider, ModelConfig
+    from novel.store.bible import StoryBible
+    from novel.store.vector import VectorMemory, hash_embed
+
+    proj = NovelProject.scaffold("n", genre="fantasy", root=tmp_path)
+    bible = StoryBible(proj)
+    concept = Concept(logline="L", genre="fantasy", tone="grim", themes=["x"],
+                      target_length_words=9000, audience="a")
+    beat = ChapterBeat(pov="Ara", setting="tavern", event="meet informant",
+                       emotional_turn="doubt", characters=["c1"])
+    outline = Outline(arcs=[Arc(arc_name="A", chapters=[
+        ChapterOutline(chapter_no=1, chapter_title="T1", beats=[beat])])])
+    chars = [Character(id="c1", slug="ara", name="Ara", role="protagonist",
+                       backstory="b", motivation="m", arc="a")]
+    failing = ReviewScore(artifact_type="chapter", overall=40,
+                          scores={"beat_adherence": DimensionScore(score=40, critique="weak")})
+    provider = FakeProvider(responses={
+        "strategist": concept, "worldbuilder": World(setting="city"),
+        "character": chars, "outliner": outline,
+        "writer": LONG, "continuity": "[]", "editor": LONG, "scorer": failing,
+        "extractor": {"character_states": {}, "voice_samples": {}, "mannerisms_used": {},
+                      "key_events": [], "threads_advanced": [], "new_information_revealed": []},
+    }, tag_key="agent")
+    cfg_map = {name: ModelConfig("zhipu", "x") for name in
+               ["strategist", "worldbuilder", "character", "outliner", "writer",
+                "continuity", "editor", "scorer", "extractor"]}
+    state = graph.run_full_pipeline(
+        provider=provider, cfg_map=cfg_map, bible=bible,
+        vector=VectorMemory(proj, embed=hash_embed), proj=proj, premise="a thief",
+        target_chapters=1, max_retries=2,
+        on_gate=lambda label, artifact: True)  # human approves the failed chapter
+    assert state.error is None
+    assert (proj.root / "chapters" / "001.md").exists()
+    recs = ReviewStore(proj).list_for_chapter(1)
+    assert any(r.passed for r in recs), "human override must persist a passed record"
+    # and the chapter must now count as complete for resume:
+    assert is_chapter_complete(proj, ReviewStore(proj), 1) is True
 
 
 def test_min_chapter_chars_param_gates_completeness(tmp_path):

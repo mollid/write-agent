@@ -154,6 +154,13 @@ def run_full_pipeline(
                     state.error = f"chapter {chapter_no} rejected after {max_retries} attempts"
                     emit({"type": "chapter_skipped", "chapter": chapter_no, "reason": state.error})
                     continue
+                # the human shipped this failing chapter: persist a passed record
+                # so resume (is_chapter_complete) treats it as complete
+                reviews.append(ReviewRecord(
+                    chapter=chapter_no, attempt=attempt, artifact_type=rs.artifact_type,
+                    overall=rs.overall, summary=f"human override: {rs.summary}",
+                    scores=rs.scores, passed=True,
+                    timestamp=datetime.now(UTC).isoformat()))
             # continuity
             emit({"type": "stage", "stage": "continuity", "chapter": chapter_no})
             issues = ContinuityAgent(provider, agent("continuity")).run(
