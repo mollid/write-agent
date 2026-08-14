@@ -15,6 +15,13 @@ build/
 .env.*
 *.key
 
+# 生成的小说项目目录（CLI 运行产物）
+demo-novel/
+*-novel/
+
+# SDD 工作区（过程产物，不纳入版本控制）
+.superpowers/
+
 # 编辑器/系统
 .idea/
 .vscode/
