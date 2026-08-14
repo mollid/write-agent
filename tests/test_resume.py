@@ -54,3 +54,29 @@ def test_legacy_project_without_reviews_jsonl(tmp_path):
     assert is_chapter_complete(proj, reviews, 1) is True
     _write_chapter(proj, 1, "")
     assert is_chapter_complete(proj, reviews, 1) is False
+
+
+def test_next_start_chapter_positions(tmp_path):
+    from novel.resume import next_start_chapter
+    proj = _proj(tmp_path)
+    reviews = ReviewStore(proj)
+    # empty project -> 1
+    assert next_start_chapter(proj, reviews) == 1
+    # chapters 1-2 complete -> 3
+    for n in (1, 2):
+        _write_chapter(proj, n, LONG)
+        reviews.append(_pass_review(n))
+    assert next_start_chapter(proj, reviews) == 3
+    # hole: 003 exists but empty -> resume at 3 even though it is the last file
+    _write_chapter(proj, 3, "")
+    assert next_start_chapter(proj, reviews) == 3
+    # middle hole: 004 complete, 003 empty -> resume at 3
+    _write_chapter(proj, 4, LONG)
+    reviews.append(_pass_review(4))
+    assert next_start_chapter(proj, reviews) == 3
+    # min_chars override: 62-char demo prose vs threshold 100
+    reviews.path().unlink()
+    _write_chapter(proj, 1, "x" * 62)
+    assert next_start_chapter(proj, reviews, min_chars=100) == 1
+    # at 50, chapters 1 (62 chars) and 2 (LONG) are complete; 003 is empty -> 3
+    assert next_start_chapter(proj, reviews, min_chars=50) == 3
