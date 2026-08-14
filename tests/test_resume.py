@@ -99,8 +99,17 @@ def _run_pipeline(tmp_path, prose: str, target: int, start: int = 1,
                   proj: NovelProject | None = None):
     """Demo-mode pipeline run with FakeProvider; pass `proj` back in to rerun."""
     from novel.graph import run_full_pipeline
-    from novel.models import Arc, ChapterBeat, ChapterOutline, Character, Concept, \
-        DimensionScore, Outline, ReviewScore, World
+    from novel.models import (
+        Arc,
+        ChapterBeat,
+        ChapterOutline,
+        Character,
+        Concept,
+        DimensionScore,
+        Outline,
+        ReviewScore,
+        World,
+    )
     from novel.providers import FakeProvider, ModelConfig
     from novel.store.bible import StoryBible
     from novel.store.vector import VectorMemory, hash_embed
@@ -152,3 +161,128 @@ def test_stale_tmp_cleaned_on_rerun(tmp_path):
     assert state2.error is None
     assert (proj.root / "chapters" / "002.md").read_text(encoding="utf-8") == LONG
     assert list((proj.root / "chapters").glob("*.tmp")) == []
+
+
+class _CountingProvider:
+    """Wraps FakeProvider, counting calls per agent tag (protocol-compatible)."""
+
+    def __init__(self, responses: dict[str, object]) -> None:
+        from collections import Counter
+
+        from novel.providers import FakeProvider, _agent_tag
+        self._inner = FakeProvider(responses, tag_key="agent")
+        self._agent_tag = _agent_tag
+        self.counts: Counter[str] = Counter()
+
+    def complete(self, messages, cfg, *, seed=None):
+        self.counts[self._agent_tag(messages, "agent")] += 1
+        return self._inner.complete(messages, cfg, seed=seed)
+
+    def complete_structured(self, messages, schema, cfg, *, seed=None):
+        self.counts[self._agent_tag(messages, "agent")] += 1
+        return self._inner.complete_structured(messages, schema, cfg, seed=seed)
+
+
+def _run_counting(tmp_path, target: int, start: int = 1):
+    """Like _run_pipeline but with a counting provider; returns (proj, state, provider)."""
+    from novel import graph
+    from novel.models import (
+        Arc,
+        ChapterBeat,
+        ChapterOutline,
+        Character,
+        Concept,
+        DimensionScore,
+        Outline,
+        ReviewScore,
+        World,
+    )
+    from novel.providers import ModelConfig
+    from novel.store.bible import StoryBible
+    from novel.store.vector import VectorMemory, hash_embed
+
+    proj = NovelProject.scaffold("n", genre="fantasy", root=tmp_path)
+    bible = StoryBible(proj)
+    vector = VectorMemory(proj, embed=hash_embed)
+    concept = Concept(logline="L", genre="fantasy", tone="grim", themes=["x"],
+                      target_length_words=9000, audience="a")
+    beat = ChapterBeat(pov="Ara", setting="tavern", event="meet informant",
+                       emotional_turn="doubt", characters=["c1"])
+    outline = Outline(arcs=[Arc(arc_name="A", chapters=[
+        ChapterOutline(chapter_no=i, chapter_title=f"T{i}", beats=[beat])
+        for i in range(1, target + 1)])])
+    chars = [Character(id="c1", slug="ara", name="Ara", role="protagonist",
+                       backstory="b", motivation="m", arc="a")]
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
+    provider = _CountingProvider({
+        "strategist": concept, "worldbuilder": World(setting="city"),
+        "character": chars, "outliner": outline,
+        "writer": LONG, "continuity": "[]", "editor": LONG, "scorer": passing,
+        "extractor": {"character_states": {}, "voice_samples": {}, "mannerisms_used": {},
+                      "key_events": [], "threads_advanced": [], "new_information_revealed": []},
+    })
+    cfg_map = {name: ModelConfig("zhipu", "x") for name in
+               ["strategist", "worldbuilder", "character", "outliner", "writer",
+                "continuity", "editor", "scorer", "extractor"]}
+    state = graph.run_full_pipeline(
+        provider=provider, cfg_map=cfg_map, bible=bible, vector=vector,
+        proj=proj, premise="a thief", target_chapters=target, start_chapter=start)
+    return proj, state, provider
+
+
+def _rerun(proj, provider, target: int, start: int = 1, min_chars: int | None = None,
+           events: list | None = None):
+    from novel import graph
+    from novel.providers import ModelConfig
+    from novel.store.bible import StoryBible
+    from novel.store.vector import VectorMemory, hash_embed
+    kwargs = {}
+    if min_chars is not None:
+        kwargs["min_chapter_chars"] = min_chars
+    return graph.run_full_pipeline(
+        provider=provider,
+        cfg_map={name: ModelConfig("zhipu", "x") for name in
+                 ["strategist", "worldbuilder", "character", "outliner", "writer",
+                  "continuity", "editor", "scorer", "extractor"]},
+        bible=StoryBible(proj), vector=VectorMemory(proj, embed=hash_embed),
+        proj=proj, premise="a thief", target_chapters=target, start_chapter=start,
+        on_event=events.append if events is not None else None, **kwargs)
+
+
+def test_complete_chapters_skipped_on_rerun(tmp_path):
+    proj, state, provider = _run_counting(tmp_path, target=3)
+    assert state.error is None
+    assert provider.counts["writer"] == 3
+    events: list[dict] = []
+    state2 = _rerun(proj, provider, target=3, start=1, events=events)
+    assert state2.error is None
+    assert provider.counts["writer"] == 3  # no extra writer calls
+    skips = [e for e in events if e["type"] == "chapter_skipped"]
+    assert [e["chapter"] for e in skips] == [1, 2, 3]
+    assert all(e["reason"] == "already complete" for e in skips)
+
+
+def test_pipeline_rewrites_invalid_hole(tmp_path):
+    proj, _state, provider = _run_counting(tmp_path, target=3)
+    assert provider.counts["writer"] == 3
+    # chapter 2 got truncated by a crash: rerun must rewrite ONLY chapter 2
+    (proj.root / "chapters" / "002.md").write_text("", encoding="utf-8")
+    events: list[dict] = []
+    state2 = _rerun(proj, provider, target=3, start=2, events=events)
+    assert state2.error is None
+    assert provider.counts["writer"] == 4  # exactly one rewrite (chapter 2)
+    assert (proj.root / "chapters" / "002.md").read_text(encoding="utf-8") == LONG
+    skips = [e for e in events if e["type"] == "chapter_skipped"]
+    assert [e["chapter"] for e in skips] == [3]  # chapter 3 untouched
+    assert list((proj.root / "chapters").glob("*.tmp")) == []
+
+
+def test_min_chapter_chars_param_gates_completeness(tmp_path):
+    proj, _state, provider = _run_counting(tmp_path, target=1)
+    assert provider.counts["writer"] == 1
+    events: list[dict] = []
+    # LONG (~110 chars) is complete at min_chars=50 but not at 500
+    state2 = _rerun(proj, provider, target=1, start=1, min_chars=500, events=events)
+    assert state2.error is None
+    assert provider.counts["writer"] == 2  # rewritten under the stricter threshold

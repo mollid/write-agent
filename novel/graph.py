@@ -20,6 +20,7 @@ from novel.memory.extractor import extract_updates
 from novel.models import Event, Foreshadow, ForeshadowStatus, Mannerism, ReviewRecord, ReviewScore
 from novel.project import NovelProject
 from novel.providers import ModelProvider
+from novel.resume import is_chapter_complete
 from novel.scorer_rubrics import apply_review, decide
 from novel.store.bible import StoryBible
 from novel.store.reviews import ReviewStore
@@ -53,7 +54,7 @@ def run_full_pipeline(
     *, provider: ModelProvider, cfg_map: dict[str, ModelConfig], bible: StoryBible,
     vector: VectorMemory, proj: NovelProject, premise: str, target_chapters: int,
     score_min: int = 80, max_retries: int = 3, token_budget: int = 24000,
-    start_chapter: int = 1,
+    start_chapter: int = 1, min_chapter_chars: int = 50,
     on_gate: Callable[[str, object], bool] | None = None,
     on_event: Callable[[dict[str, object]], None] | None = None,
 ) -> PipelineState:
@@ -112,6 +113,10 @@ def run_full_pipeline(
             chapter_no += 1
             if chapter_no > target_chapters:
                 break
+            if is_chapter_complete(proj, reviews, chapter_no, min_chapter_chars):
+                emit({"type": "chapter_skipped", "chapter": chapter_no,
+                      "reason": "already complete"})
+                continue
             beat = ch_out.beats[0] if ch_out.beats else None
             assert beat is not None, f"chapter {chapter_no} has no beat"
             emit({"type": "chapter_start", "chapter": chapter_no, "title": ch_out.chapter_title})
