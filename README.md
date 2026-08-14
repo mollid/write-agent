@@ -7,6 +7,11 @@
 - **演示模式**：默认模式，使用内置确定性示例响应，不请求任何模型服务，适合熟悉流程和验证安装。
 - **真实模型模式**：设置 `NOVEL_LIVE=1` 后通过 LiteLLM 调用 `project.config.yaml` 中配置的模型，适合实际生成内容。
 
+主要特性：
+
+- **中英文开关**：`project.config.yaml` 的 `language: zh|en` 在真实模型模式下让所有 9 个智能体统一用一种语言输出，无需每次创意里加提示词。
+- **混用多家模型**：每个智能体可各自指定 `api_base` + `api_key`，在同一项目里混用 deepseek、agnes.ai、哈基米API站、ollama 等任意 OpenAI 兼容端点。`project.config.yaml` 默认被 git 忽略，可安全存放 key。详见[配置真实模型](#配置真实模型)。
+
 ## 环境要求
 
 - Python 3.11 或更高版本
@@ -161,23 +166,25 @@ uv run novel export --format md
 
 ### 1. 设置 API Key
 
-LiteLLM 会读取服务商常用环境变量。以下是常见示例，实际变量以你所选服务商和 LiteLLM 文档为准：
+`project.config.yaml` 已被本仓库默认 git 忽略，因此可以**直接在配置里写明文 `api_key`**（见 [配置字段说明](#配置字段说明) 中的 `api_base` / `api_key`），尤其适合接入 agnes、哈基米等 OpenAI 兼容端点。
+
+除配置文件外，LiteLLM 也读取服务商常用环境变量作为另一条途径（无 `api_key` 字段时由 litellm 自动使用，例如 `provider: deepseek` 会读取 `DEEPSEEK_API_KEY`）。常见示例：
 
 ```bash
-# 智谱
+# 智谱（litellm 读取 ZHIPUAI_API_KEY）
 export ZHIPUAI_API_KEY="your-api-key"
 
-# DeepSeek
+# DeepSeek（litellm 读取 DEEPSEEK_API_KEY）
 export DEEPSEEK_API_KEY="your-api-key"
 
-# OpenAI
+# OpenAI 官方（litellm 读取 OPENAI_API_KEY；若设了 api_base 则指向兼容端点而非官方）
 export OPENAI_API_KEY="your-api-key"
 
-# Anthropic
+# Anthropic（litellm 读取 ANTHROPIC_API_KEY）
 export ANTHROPIC_API_KEY="your-api-key"
 ```
 
-不要将 API Key 写入 `project.config.yaml` 或提交到版本控制系统。
+> 安全提示：即便已忽略该配置文件，仍请确认**项目目录不在某个会 `git add -A` 的父仓库里**，并避免把含 key 的文件复制到会被提交的位置。
 
 ### 2. 编辑项目配置
 
@@ -246,6 +253,42 @@ language: zh
 
 说明：所有 OpenAI 兼容端点（含 `api_base` 的）`provider` 一律填 `openai`；未写 `api_key` 时，deepseek/anthropic 等官方 provider 由 litellm 从对应环境变量（`DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY`）读取。
 
+#### 本地部署的模型（Ollama / vLLM / LM Studio 等）
+
+本地部署的模型只要暴露 OpenAI 兼容接口即可接入，配置方式与[混用多家模型](#混用多家-openai-兼容模型)完全相同：`provider` 填 `openai`，`api_base` 指向本地端点。常见服务的默认 OpenAI 兼容端点：
+
+| 服务 | 默认 OpenAI 兼容 endpoint |
+| --- | --- |
+| Ollama | `http://localhost:11434/v1` |
+| vLLM | `http://localhost:8000/v1` |
+| LM Studio | `http://localhost:1234/v1` |
+| llama.cpp `llama-server` | `http://localhost:8080/v1` |
+| 其他（SGLang / TGI / KoboldCpp 等） | 见各服务文档，OpenAI 兼容路径通常为 `/v1` |
+
+以 Ollama 跑 `qwen2.5:14b` 为例（先 `ollama pull qwen2.5:14b` 拉模型，再 `ollama serve` 起服务）：
+
+```yaml
+models:
+  default: { provider: openai, model: qwen2.5:14b, api_base: http://localhost:11434/v1, api_key: local }
+  scorer:  { provider: deepseek, model: deepseek-v4-pro }       # 评分可继续用云，更稳
+thresholds:
+  score_min: 80
+  max_retries: 2
+generation:
+  human_gate_every_n_chapters: 1
+  context_token_budget: 24000
+language: zh
+```
+
+要点：
+
+- **`api_key` 填占位字符串**：本地服务通常不验证 key，但 OpenAI 客户端要求该字段非空，填任意值（如 `local`）即可。
+- **`model` 用本地实际名**：Ollama 取 `ollama list` 里的 tag（如 `qwen2.5:14b`）；vLLM 取启动 `--model` 的名字；LM Studio 取其模型标识。
+- **可混本地与云**：例如 `writer` 用本地 14B 模型跑创作、`scorer` 用 deepseek 云做评分。
+- **超时**：本地推理（尤其大模型）可能很慢，单次调用可能超过 litellm 默认超时。若遇到超时失败，可加 `timeout` 配置项（当前未暴露；需要时可向本项目提一句，加上即可）。
+- **离线环境**：无网时 litellm 启动期会尝试拉取模型价目表并失败回退为本地副本，仅打印一条警告，不影响调用。
+- 也支持 Ollama 原生协议（`provider: ollama, model: <tag>`），但需额外给 litellm 配置 ollama base，不如走 OpenAI 兼容接口统一简便，本节推荐后者。
+
 ### 3. 在真实模型模式下运行
 
 每次要调用真实模型的命令前添加 `NOVEL_LIVE=1`：
@@ -274,13 +317,14 @@ Approve? [a]pprove/[e]dit/[r]egen/[s]how
 | Strategist | 将创意转换为故事概念。 |
 | Worldbuilder | 创建世界规则、地点、势力和约束。 |
 | Character | 创建角色、动机、角色弧光与声音特征。 |
-| Outliner | 将故事拆分为篇章、章节和情节节拍。 |
+| Outliner | 将故事拆分为篇章、章节和情节节拍，并维护伏笔台账。 |
 | Writer | 基于当前章节计划和工作记忆生成正文。 |
 | Continuity | 检查角色状态、时间线、地点和因果一致性。 |
 | Scorer | 根据产物类型的评分量表评估质量，并触发定向重写。 |
 | Editor | 对章节进行最后编辑。 |
+| Extractor | 从已写章节中抽取角色状态、声音样本、神态习惯和关键事件，回写故事圣经与向量记忆，供下一章使用。 |
 
-单次评分中任一维度低于 `score_min` 时，系统会按批评意见进行定向重写；超过 `max_retries` 后会进入升级处理，而不是无限重试。
+单次评分中任一维度低于 `score_min` 时，系统会按批评意见进行定向重写；超过 `max_retries` 后会升级给人审批而不是硬放行或无限重试。
 
 ## 常用命令速查
 
@@ -339,10 +383,12 @@ uv run novel write-chapter 1 --project ./my-novel
 
 依次检查：
 
-- 是否在该终端设置了服务商所需的 API Key。
+- 是否在该终端设置了服务商所需的 API Key（环境变量），或在 `project.config.yaml` 里写了 `api_key`。
 - `NOVEL_LIVE=1` 是否加在要调用模型的命令前。
 - `project.config.yaml` 中的 `provider` 和 `model` 是否为 LiteLLM 支持的有效组合。
-- 服务商账户是否具有目标模型的访问权限与足够额度。
+- OpenAI 兼容端点（agnes / 哈基米 / Ollama / vLLM 等）`provider` 应填 `openai` 并配 `api_base`，`model` 用该端点上的实际模型名。
+- 本地端点是否在运行、端口是否正确；`api_key` 字段非空（本地可填 `local`）。
+- 服务商账户是否具有目标模型的访问权限与足够额度；本地模型是否有足够显存/是否已 `pull`。
 
 ### 章节没有从预期位置继续
 
