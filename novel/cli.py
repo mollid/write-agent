@@ -70,13 +70,19 @@ def write_chapter(n: int = typer.Argument(1, help="number of chapters to write")
     from novel.graph import run_full_pipeline
     from novel.runtime import AGENT_NAMES
     cfg_map = {name: cfg.model_for(name) for name in AGENT_NAMES}
-    existing = sorted((proj.root / "chapters").glob("[0-9][0-9][0-9].md"))
-    start_chapter = int(existing[-1].stem) + 1 if existing else 1
+    from novel.resume import next_start_chapter
+    from novel.store.reviews import ReviewStore
+    min_chars = cfg.generation.min_chapter_chars
+    start_chapter = next_start_chapter(proj, ReviewStore(proj), min_chars)
+    if start_chapter > 1:
+        console.print(f"[cyan]Resuming from chapter {start_chapter}"
+                      f" ({start_chapter - 1} chapter(s) already complete)[/cyan]")
     run_full_pipeline(provider=provider, cfg_map=cfg_map, bible=bible, vector=vector,
                       proj=proj, premise=(c.logline if (c := bible.get_concept()) else ""),
                       target_chapters=start_chapter - 1 + n, start_chapter=start_chapter,
                       score_min=cfg.thresholds.score_min, max_retries=cfg.thresholds.max_retries,
                       token_budget=cfg.generation.context_token_budget,
+                      min_chapter_chars=min_chars,
                       on_gate=_gate if is_live_mode() else None)
     console.print(f"[green]Wrote {n} chapter(s).[/green]")
 

@@ -39,3 +39,26 @@ def test_write_chapter_continues(tmp_path):
     assert r2.exit_code == 0, r2.output
     chapters = sorted((proj / "chapters").glob("[0-9][0-9][0-9].md"))
     assert len(chapters) == 5
+
+def test_write_chapter_resumes_message(tmp_path):
+    proj = _demo_project(tmp_path)
+    r1 = runner.invoke(app, ["--project", str(proj), "write-chapter", "2"])
+    assert r1.exit_code == 0, r1.output
+    r2 = runner.invoke(app, ["--project", str(proj), "write-chapter", "1"])
+    assert r2.exit_code == 0, r2.output
+    assert "Resuming from chapter 3" in r2.output
+    chapters = sorted((proj / "chapters").glob("[0-9][0-9][0-9].md"))
+    assert len(chapters) == 3
+
+
+def test_write_chapter_rewrites_empty_chapter(tmp_path):
+    proj = _demo_project(tmp_path)
+    runner.invoke(app, ["--project", str(proj), "write-chapter", "2"])
+    ch2 = proj / "chapters" / "002.md"
+    good = ch2.read_text()
+    (proj / "chapters" / "001.md").write_text("")  # simulate a crashed write
+    result = runner.invoke(app, ["--project", str(proj), "write-chapter", "1"])
+    assert result.exit_code == 0, result.output
+    assert len((proj / "chapters" / "001.md").read_text()) > 50  # rewritten
+    assert ch2.read_text() == good  # complete chapter untouched
+    assert len(sorted((proj / "chapters").glob("[0-9][0-9][0-9].md"))) == 2
