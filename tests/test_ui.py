@@ -174,3 +174,26 @@ def test_mode_endpoint(client: TestClient) -> None:
     r = client.get("/api/mode")
     assert r.status_code == 200
     assert r.json() == {"live": False}
+
+
+def test_write_chapter_rewrites_empty_chapter(client: TestClient, tmp_path: Path) -> None:
+    client.post("/api/projects", json={"name": "px"})
+    job_id = client.post("/api/projects/px/premise", json={"text": "x"}).json()["job_id"]
+    assert _wait_job(client, job_id)["status"] == "done"
+    r = client.post("/api/projects/px/write-chapter", json={"n": 2})
+    assert _wait_job(client, r.json()["job_id"])["status"] == "done"
+
+    root = tmp_path / "px"
+    ch1 = root / "chapters" / "001.md"
+    ch2 = root / "chapters" / "002.md"
+    good2 = ch2.read_text(encoding="utf-8")
+    ch1.write_text("", encoding="utf-8")  # simulate a crashed write
+
+    r2 = client.post("/api/projects/px/write-chapter", json={"n": 1})
+    job = _wait_job(client, r2.json()["job_id"])
+    assert job["status"] == "done", job["error"]
+
+    assert len(ch1.read_text(encoding="utf-8")) > 50  # rewritten
+    assert ch2.read_text(encoding="utf-8") == good2  # complete chapter untouched
+    status = client.get("/api/projects/px/status").json()
+    assert status["chapters"] == [1, 2]

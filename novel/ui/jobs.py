@@ -196,8 +196,10 @@ def run_chapters_job(proj_root: Path, n: int) -> Callable[[Job], object]:
         from novel.config import load_config
         from novel.graph import run_full_pipeline
         from novel.project import NovelProject
+        from novel.resume import next_start_chapter
         from novel.runtime import AGENT_NAMES, is_live_mode, make_provider
         from novel.store.bible import StoryBible
+        from novel.store.reviews import ReviewStore
         from novel.store.vector import VectorMemory, hash_embed
 
         proj = NovelProject(root=proj_root)
@@ -206,8 +208,8 @@ def run_chapters_job(proj_root: Path, n: int) -> Callable[[Job], object]:
         bible = StoryBible(proj)
         vector = VectorMemory(proj, embed=hash_embed)
         cfg_map = {name: cfg.model_for(name) for name in AGENT_NAMES}
-        existing = sorted((proj.root / "chapters").glob("[0-9][0-9][0-9].md"))
-        start_chapter = int(existing[-1].stem) + 1 if existing else 1
+        min_chars = cfg.generation.min_chapter_chars
+        start_chapter = next_start_chapter(proj, ReviewStore(proj), min_chars)
         concept = bible.get_concept()
         logline = concept.logline if concept is not None else ""
         return run_full_pipeline(
@@ -216,6 +218,7 @@ def run_chapters_job(proj_root: Path, n: int) -> Callable[[Job], object]:
             target_chapters=start_chapter - 1 + n, start_chapter=start_chapter,
             score_min=cfg.thresholds.score_min, max_retries=cfg.thresholds.max_retries,
             token_budget=cfg.generation.context_token_budget,
+            min_chapter_chars=min_chars,
             on_gate=job.gate if is_live_mode() else None,
             on_event=job.emit,
         )
