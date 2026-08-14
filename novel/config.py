@@ -10,6 +10,8 @@ import yaml
 class ModelConfig:
     provider: str
     model: str
+    api_base: str | None = None      # OpenAI-compatible base URL override (e.g. https://apihub.agnes-ai.com/v1)
+    api_key: str | None = None       # secret; will be written into per-project project.config.yaml (which is gitignored)
 
 
 @dataclass
@@ -43,7 +45,12 @@ class ProjectConfig:
 def load_config(path: Path) -> ProjectConfig:
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     models = {
-        name: ModelConfig(provider=m.get("provider", ""), model=m.get("model", ""))
+        name: ModelConfig(
+            provider=m.get("provider", ""),
+            model=m.get("model", ""),
+            api_base=m.get("api_base") or m.get("base_url"),
+            api_key=m.get("api_key"),
+        )
         for name, m in (raw.get("models") or {}).items()
     }
     th = raw.get("thresholds") or {}

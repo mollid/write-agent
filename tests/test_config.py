@@ -33,3 +33,20 @@ def test_language_reads_zh(tmp_path):
     )
     cfg = load_config(proj.config_path)
     assert cfg.language == "zh"
+
+
+def test_model_config_api_base_and_api_key(tmp_path):
+    proj = NovelProject.scaffold("n", genre="g", root=tmp_path)
+    proj.config_path.write_text(
+        "models:\n"
+        "  outliner: { provider: openai, model: gpt-5.6-terra,\n"
+        "              api_base: https://api.gemai.cc/v1, api_key: sk-xyz }\n"
+        "  default: { provider: deepseek, model: deepseek-v4-pro }\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(proj.config_path)
+    mc = cfg.model_for("outliner")
+    assert mc.api_base == "https://api.gemai.cc/v1"
+    assert mc.api_key == "sk-xyz"
+    # base_url alias works too
+    assert cfg.model_for("default").api_base is None

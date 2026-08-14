@@ -122,8 +122,15 @@ class LiteLLMProvider:
     def complete(self, messages: list[dict[str, object]], cfg: ModelConfig, *, seed: int | None = None) -> str:
         import litellm  # local import: keeps tests import-free of network libs
 
-        resp = litellm.completion(model=f"{cfg.provider}/{cfg.model}",
-                                  messages=self._lang_message() + messages, seed=seed)
+        kwargs: dict[str, object] = {"model": f"{cfg.provider}/{cfg.model}",
+                                     "messages": self._lang_message() + messages, "seed": seed}
+        # Per-call api_base / api_key override: lets each project mix OpenAI-compatible
+        # endpoints (deepseek, agnes, 哈基米API站, ollama, ...) from one config file.
+        if cfg.api_base:
+            kwargs["api_base"] = cfg.api_base
+        if cfg.api_key:
+            kwargs["api_key"] = cfg.api_key
+        resp = litellm.completion(**kwargs)
         return str(resp["choices"][0]["message"]["content"])
 
     def complete_structured(

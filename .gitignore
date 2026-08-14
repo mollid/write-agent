@@ -19,6 +19,9 @@ build/
 demo-novel/
 *-novel/
 
+# 每个小说项目的配置含 API key，不入库
+project.config.yaml
+
 # SDD 工作区（过程产物，不纳入版本控制）
 .superpowers/
 

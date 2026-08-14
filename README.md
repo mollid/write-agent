@@ -215,13 +215,36 @@ generation:
 
 | 字段 | 作用 |
 | --- | --- |
-| `models.<agent>.provider` | LiteLLM 服务商名称，如 `openai`、`anthropic`、`deepseek`、`zhipu`。 |
+| `models.<agent>.provider` | LiteLLM 服务商名称，如 `openai`、`anthropic`、`deepseek`、`zhipu`。OpenAI 兼容接口统一填 `openai` 并配合 `api_base`。 |
 | `models.<agent>.model` | 服务商的实际模型名称。 |
+| `models.<agent>.api_base` | （可选）OpenAI 兼容接口的 base URL，用于接入 agnes、哈基米API站、ollama 等任意兼容端点。也写作 `base_url`。 |
+| `models.<agent>.api_key` | （可选）该模型的 API key。**写入后请勿把 `project.config.yaml` 提交进 git**（本仓库已默认忽略它）。 |
 | `models.default` | 未单独指定模型的智能体的默认配置。 |
 | `thresholds.score_min` | 每个评分维度的最低通过分数，默认 `80`。 |
 | `thresholds.max_retries` | 未通过评分时的最大定向重写次数，默认 `3`。 |
 | `generation.context_token_budget` | 每章工作记忆的上下文 Token 预算，默认 `24000`。 |
 | `generation.human_gate_every_n_chapters` | 人工审核频率配置；当前实现会在真实模式的大纲与每章阶段请求批准。 |
+| `language` | 输出语言开关，`en`（默认）或 `zh`。真实模式下所有智能体按此语言生成自然语言文本。 |
+
+#### 混用多家 OpenAI 兼容模型
+
+每个智能体可各自指定 `api_base` + `api_key`，从而在同一项目里混用 deepseek、agnes、哈基米API站等。`project.config.yaml` 已被 git 忽略，可安全存放 key：
+
+```yaml
+models:
+  default: { provider: deepseek, model: deepseek-v4-pro }                                                       # deepseek 官方（litellm 自动用 DEEPSEEK_API_KEY，无需写 api_key）
+  writer:  { provider: openai,   model: gpt-5.6-terra, api_base: https://api.gemai.cc/v1,        api_key: sk-哈基米key }   # opencode 免费模型
+  scorer:  { provider: openai,   model: agnes-xxx,      api_base: https://apihub.agnes-ai.com/v1, api_key: sk-agnes-key }  # agnes.ai
+thresholds:
+  score_min: 80
+  max_retries: 2
+generation:
+  human_gate_every_n_chapters: 1
+  context_token_budget: 24000
+language: zh
+```
+
+说明：所有 OpenAI 兼容端点（含 `api_base` 的）`provider` 一律填 `openai`；未写 `api_key` 时，deepseek/anthropic 等官方 provider 由 litellm 从对应环境变量（`DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY`）读取。
 
 ### 3. 在真实模型模式下运行
 
