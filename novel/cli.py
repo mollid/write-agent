@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import typer
@@ -9,7 +8,7 @@ from rich.table import Table
 
 from novel.config import load_config
 from novel.project import NovelProject
-from novel.providers import ModelProvider
+from novel.runtime import is_live_mode, make_provider
 from novel.store.bible import StoryBible
 from novel.store.vector import VectorMemory, hash_embed
 
@@ -20,49 +19,6 @@ console = Console()
 def _load_project(project: Path | None) -> NovelProject:
     root = project or _global_project or Path.cwd()
     return NovelProject(root=root)
-
-
-def _make_provider(cfg: object) -> ModelProvider:
-    from novel.providers import LiteLLMProvider
-    if os.environ.get("NOVEL_LIVE") == "1":
-        lang = getattr(cfg, "language", "en")
-        return LiteLLMProvider(language=lang)
-    return _demo_provider()
-
-
-def _demo_provider() -> ModelProvider:
-    from novel.models import (
-        Arc,
-        ChapterBeat,
-        ChapterOutline,
-        Character,
-        Concept,
-        DimensionScore,
-        Outline,
-        ReviewScore,
-        World,
-    )
-    from novel.providers import FakeProvider
-    concept = Concept(logline="A thief steals time.", genre="fantasy", tone="grim", themes=["loss"],
-                      target_length_words=9000, audience="adult")
-    beat = ChapterBeat(pov="Ara", setting="tavern", event="meet informant", emotional_turn="doubt",
-                       characters=["c1"])
-    outline = Outline(arcs=[Arc(arc_name="A", chapters=[
-        ChapterOutline(chapter_no=i, chapter_title=f"T{i}", beats=[beat]) for i in range(1, 4)])],
-        foreshadow_ledger=[])
-    chars = [Character(id="c1", slug="ara", name="Ara", role="protagonist",
-                       backstory="orphan", motivation="revenge", arc="a")]
-    passing = ReviewScore(artifact_type="chapter", overall=90,
-                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
-    return FakeProvider(responses={
-        "strategist": concept, "worldbuilder": World(setting="city of bells"),
-        "character": chars, "outliner": outline,
-        "writer": "Ara stepped into the tavern. The thief's work was about to begin.",
-        "continuity": "[]", "editor": "Ara stepped into the tavern.",
-        "scorer": passing,
-        "extractor": {"character_states": {}, "voice_samples": {}, "mannerisms_used": {},
-              "key_events": [], "threads_advanced": [], "new_information_revealed": []},
-    }, tag_key="agent")
 
 
 def _gate(label: str, artifact: object) -> bool:
@@ -95,7 +51,7 @@ def premise(text: str, project: Path | None = _project_opt) -> None:
     """Run Strategist on a premise (demo mode uses canned data)."""
     proj = _load_project(project)
     cfg = load_config(proj.config_path)
-    provider = _make_provider(cfg)
+    provider = make_provider(cfg)
     from novel.agents.strategist import StrategistAgent
     concept = StrategistAgent(provider, cfg.model_for("strategist")).run(text)
     StoryBible(proj).set_concept(concept)
@@ -108,21 +64,20 @@ def write_chapter(n: int = typer.Argument(1, help="number of chapters to write")
     """Write the next N chapters end-to-end (demo or live)."""
     proj = _load_project(project)
     cfg = load_config(proj.config_path)
-    provider = _make_provider(cfg)
+    provider = make_provider(cfg)
     bible = StoryBible(proj)
     vector = VectorMemory(proj, embed=hash_embed)
     from novel.graph import run_full_pipeline
-    cfg_map = {name: cfg.model_for(name) for name in
-               ["strategist", "worldbuilder", "character", "outliner", "writer",
-                "continuity", "editor", "scorer", "extractor"]}
+    from novel.runtime import AGENT_NAMES
+    cfg_map = {name: cfg.model_for(name) for name in AGENT_NAMES}
     existing = sorted((proj.root / "chapters").glob("[0-9][0-9][0-9].md"))
     start_chapter = int(existing[-1].stem) + 1 if existing else 1
     run_full_pipeline(provider=provider, cfg_map=cfg_map, bible=bible, vector=vector,
-                      proj=proj, premise=bible.get_concept().logline,
+                      proj=proj, premise=(c.logline if (c := bible.get_concept()) else ""),
                       target_chapters=start_chapter - 1 + n, start_chapter=start_chapter,
                       score_min=cfg.thresholds.score_min, max_retries=cfg.thresholds.max_retries,
                       token_budget=cfg.generation.context_token_budget,
-                      on_gate=_gate if os.environ.get("NOVEL_LIVE") == "1" else None)
+                      on_gate=_gate if is_live_mode() else None)
     console.print(f"[green]Wrote {n} chapter(s).[/green]")
 
 

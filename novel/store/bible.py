@@ -66,8 +66,9 @@ class StoryBible:
         d["concept"] = c.model_dump()
         self._save(d)
 
-    def get_concept(self) -> Concept:
-        return Concept.model_validate(self._load()["concept"])
+    def get_concept(self) -> Concept | None:
+        raw = self._load().get("concept")
+        return Concept.model_validate(raw) if raw else None
 
     def set_world(self, w: World) -> None:
         d = self._load()

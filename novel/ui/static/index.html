@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>多智能体小说生成</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>📚 多智能体小说生成</h1>
+  <div class="header-right">
+    <span id="mode-badge" class="badge">演示模式</span>
+    <select id="project-select"><option value="">选择项目…</option></select>
+    <button id="btn-new-project">新建项目</button>
+  </div>
+</header>
+
+<dialog id="new-project-dialog">
+  <form id="new-project-form" method="dialog">
+    <h3>新建小说项目</h3>
+    <label>项目名 <input name="name" required pattern="[\w\-]+" title="字母/数字/下划线/连字符"></label>
+    <label>题材 <input name="genre" value="fantasy" required></label>
+    <menu>
+      <button type="button" id="btn-cancel-new">取消</button>
+      <button type="submit" id="btn-confirm-new" class="primary">创建</button>
+    </menu>
+  </form>
+</dialog>
+
+<main>
+  <section id="panel-generate" class="card">
+    <h2>生成</h2>
+    <div id="no-project-hint" class="hint">请先在右上角选择或新建一个项目。</div>
+    <div id="generate-body" hidden>
+      <div class="row">
+        <input id="premise-input" type="text" placeholder="一句话创意，例如：一名能偷走时间的盗贼">
+        <button id="btn-premise">生成概念</button>
+      </div>
+      <div class="row">
+        <label>生成章节数 <input id="chapter-count" type="number" min="1" max="50" value="3"></label>
+        <button id="btn-write" class="primary">开始生成章节</button>
+        <button id="btn-cancel" class="danger" hidden>取消任务</button>
+      </div>
+      <div id="status-line" class="status-line"></div>
+      <div class="progress-wrap"><div id="progress-bar" class="progress-bar"></div></div>
+      <pre id="event-log" class="event-log"></pre>
+      <div id="gate-card" class="gate-card" hidden>
+        <h3>⚠ 审批请求</h3>
+        <div id="gate-label" class="gate-label"></div>
+        <pre id="gate-artifact" class="gate-artifact"></pre>
+        <div class="row">
+          <button id="btn-approve" class="primary">✅ 批准</button>
+          <button id="btn-reject" class="danger">❌ 拒绝</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="panel-read" class="card">
+    <h2>阅读</h2>
+    <div id="read-body">
+      <div class="row">
+        <span id="chapter-list" class="chapter-list"></span>
+        <button id="btn-export">导出 novel.md</button>
+      </div>
+      <div id="reader" class="reader">选择章节阅读…</div>
+    </div>
+  </section>
+
+  <section id="panel-reviews" class="card">
+    <h2>评分历史</h2>
+    <div id="reviews-body">
+      <div class="row">
+        <span class="hint" style="padding:0">每次质量评分（含重写前后的对比）都会留档，点击章节展开各维度得分与批评意见。</span>
+        <button id="btn-refresh-reviews">刷新</button>
+      </div>
+      <div id="reviews-list"></div>
+    </div>
+  </section>
+
+  <section id="panel-threads" class="card">
+    <h2>未闭合伏笔</h2>
+    <table id="threads-table">
+      <thead><tr><th>ID</th><th>描述</th><th>状态</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+</main>
+
+<footer id="export-result" class="footer"></footer>
+<script src="/app.js"></script>
+</body>
+</html>

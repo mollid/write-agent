@@ -156,3 +156,15 @@ class ReviewScore(BaseModel):
     summary: str = ""
     attempt: int = 1          # pipeline-managed
     passed: bool = False      # set by decide()
+
+
+class ReviewRecord(BaseModel):
+    """Persisted scoring event: one record per scorer invocation on a chapter."""
+    chapter: int
+    attempt: int
+    artifact_type: str = ""
+    overall: int = 0
+    summary: str = ""
+    scores: dict[str, DimensionScore] = Field(default_factory=dict)
+    passed: bool = False
+    timestamp: str = ""       # ISO-8601 UTC
