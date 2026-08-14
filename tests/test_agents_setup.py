@@ -74,3 +74,26 @@ def test_character_build_messages_uses_v2_prompt():
     assert "<world>" in msgs[1]["content"]
     assert concept.model_dump_json() in msgs[1]["content"]
     assert world.model_dump_json() in msgs[1]["content"]
+
+
+def test_outliner_build_messages_uses_v2_prompt():
+    p, concept, world, chars = _prov()
+    agent = OutlinerAgent(p, ModelConfig("anthropic", "claude"))
+    msgs = agent.build_messages((concept, world, chars))
+    system, user = msgs[0]["content"], msgs[1]["content"]
+    # v2 identity + schema + critical rules present verbatim
+    assert "story architect" in system
+    assert '"arc_name"' in system
+    assert '"foreshadow_ledger"' in system
+    assert "ID discipline" in system
+    assert system.rstrip().endswith("Return ONLY the JSON object.")
+    # roster_block injected into both system and user
+    roster_line = "- c1 (Ara): protagonist"
+    assert roster_line in system
+    assert roster_line in user
+    # user carries concept/world XML blocks
+    assert "<concept>" in user and "</concept>" in user
+    assert "<world>" in user and "</world>" in user
+    assert concept.model_dump_json() in user
+    assert world.model_dump_json() in user
+    assert user.rstrip().endswith("</characters>")

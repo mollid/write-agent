@@ -83,6 +83,7 @@ class Character(BaseModel):
 
 
 class ChapterBeat(BaseModel):
+    beat_id: str = ""
     pov: str
     setting: str
     event: str
@@ -93,19 +94,26 @@ class ChapterBeat(BaseModel):
 
 
 class ChapterOutline(BaseModel):
-    id: str
-    title: str = ""
+    chapter_no: int
+    chapter_title: str = ""
     beats: list[ChapterBeat] = Field(default_factory=list)
 
 
 class Arc(BaseModel):
-    id: str
-    title: str
+    arc_name: str
     chapters: list[ChapterOutline] = Field(default_factory=list)
+
+
+class ForeshadowLedgerEntry(BaseModel):
+    id: str
+    planted_in: str = ""
+    paid_off_in: str = ""
+    description: str = ""
 
 
 class Outline(BaseModel):
     arcs: list[Arc] = Field(default_factory=list)
+    foreshadow_ledger: list[ForeshadowLedgerEntry] = Field(default_factory=list)
 
 
 class Foreshadow(BaseModel):

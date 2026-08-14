@@ -27,7 +27,7 @@ def _seed(tmp_path):
                                  mannerisms=[Mannerism(text="bites nail", used_count=5),
                                              Mannerism(text="sighs", used_count=0)]))
     beat = ChapterBeat(pov="Ara", setting="tavern", event="meet", emotional_turn="doubt", characters=["c1"])
-    outline = Outline(arcs=[Arc(id="a1", title="A", chapters=[ChapterOutline(id="ch1", title="One", beats=[beat])])])
+    outline = Outline(arcs=[Arc(arc_name="A", chapters=[ChapterOutline(chapter_no=1, chapter_title="One", beats=[beat])])])
     b.set_outline(outline)
     vm = VectorMemory(proj, embed=hash_embed); vm.add_summary("chapter", "ch0", "prior tavern scene")
     return proj, b, vm, beat

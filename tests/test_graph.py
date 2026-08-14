@@ -8,6 +8,7 @@ from novel.models import (
     CharacterState,
     Concept,
     Event,
+    ForeshadowLedgerEntry,
     ForeshadowStatus,
     Outline,
     ReviewDimension,
@@ -30,8 +31,8 @@ def test_smoke_three_chapter_micro_novel(tmp_path):
                       target_length_words=9000, audience="a")
     beat = ChapterBeat(pov="Ara", setting="tavern", event="meet informant",
                        emotional_turn="doubt", characters=["c1"])
-    outline = Outline(arcs=[Arc(id="a1", title="A", chapters=[
-        ChapterOutline(id=f"ch{i}", title=f"T{i}", beats=[beat]) for i in range(1, 4)])])
+    outline = Outline(arcs=[Arc(arc_name="A", chapters=[
+        ChapterOutline(chapter_no=i, chapter_title=f"T{i}", beats=[beat]) for i in range(1, 4)])])
     chars = [Character(id="c1", slug="ara", name="Ara", role="protagonist",
                        backstory="b", motivation="m", arc="a")]
     passing = ReviewScore(artifact_ref="x", attempt=1,
@@ -74,8 +75,8 @@ def _one_chapter_setup(tmp_path):
                       target_length_words=9000, audience="a")
     beat = ChapterBeat(pov="Ara", setting="tavern", event="meet informant",
                        emotional_turn="doubt", characters=["c1"], plants=["the bell rings"])
-    outline = Outline(arcs=[Arc(id="a1", title="A", chapters=[
-        ChapterOutline(id="ch1", title="T1", beats=[beat])])])
+    outline = Outline(arcs=[Arc(arc_name="A", chapters=[
+        ChapterOutline(chapter_no=1, chapter_title="T1", beats=[beat])])])
     chars = [Character(id="c1", slug="ara", name="Ara", role="protagonist",
                        backstory="b", motivation="m", arc="a")]
     return proj, bible, vector, concept, beat, outline, chars
@@ -154,3 +155,36 @@ def test_voice_mannerisms_and_events_persist(tmp_path):
     assert any(e.id == "e1" for e in bible.list_events())
     assert any(f.description == "the bell rings" and f.status == ForeshadowStatus.OPEN
                and f.planted_ch == 1 for f in bible.list_foreshadow())
+
+
+def test_foreshadow_ledger_registered_on_setup(tmp_path):
+    proj, bible, vector, concept, beat, _outline, chars = _one_chapter_setup(tmp_path)
+    # rebuild outline carrying an explicit foreshadow_ledger entry
+    outline = Outline(
+        arcs=[Arc(arc_name="A", chapters=[ChapterOutline(chapter_no=1, chapter_title="T1", beats=[beat])])],
+        foreshadow_ledger=[ForeshadowLedgerEntry(
+            id="fs-99", planted_in="c03-b02", paid_off_in="c10-b01",
+            description="the cracked bell")],
+    )
+    passing = ReviewScore(artifact_ref="x", attempt=1,
+                          dimensions=[ReviewDimension(name="q", score=90)], passed=True)
+    provider = FakeProvider(responses={
+        "strategist": concept,
+        "worldbuilder": World(setting="city"),
+        "character": chars,
+        "outliner": outline,
+        "writer": "Chapter prose text.",
+        "continuity": "[]",
+        "editor": "Chapter prose text.",
+        "scorer": passing,
+        "extractor": {"character_states": {}, "voice_samples": {}, "mannerisms_used": {}, "events": []},
+    }, tag_key="agent")
+    state = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                              proj=proj, premise="a thief", target_chapters=1)
+    assert state.error is None
+    # ledger entry registered as an OPEN foreshadow, planted_ch parsed from "c03-b02" -> 3
+    fs = [f for f in bible.list_foreshadow() if f.id == "fs-99"]
+    assert len(fs) == 1
+    assert fs[0].status == ForeshadowStatus.OPEN
+    assert fs[0].planted_ch == 3
+    assert fs[0].description == "the cracked bell"

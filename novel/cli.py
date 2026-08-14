@@ -46,8 +46,9 @@ def _demo_provider() -> ModelProvider:
                       target_length_words=9000, audience="adult")
     beat = ChapterBeat(pov="Ara", setting="tavern", event="meet informant", emotional_turn="doubt",
                        characters=["c1"])
-    outline = Outline(arcs=[Arc(id="a1", title="A", chapters=[
-        ChapterOutline(id=f"ch{i}", title=f"T{i}", beats=[beat]) for i in range(1, 4)])])
+    outline = Outline(arcs=[Arc(arc_name="A", chapters=[
+        ChapterOutline(chapter_no=i, chapter_title=f"T{i}", beats=[beat]) for i in range(1, 4)])],
+        foreshadow_ledger=[])
     chars = [Character(id="c1", slug="ara", name="Ara", role="protagonist",
                        backstory="orphan", motivation="revenge", arc="a")]
     passing = ReviewScore(artifact_ref="x", attempt=1,

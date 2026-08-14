@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -30,6 +31,12 @@ class PipelineState:
     last_review: ReviewScore | None = None
     human_overrides: dict[str, object] = field(default_factory=dict)
     error: str | None = None
+
+
+def _parse_ch(ref: str) -> int | None:
+    """Best-effort: 'c03-b01' / 'ch3' -> 3."""
+    m = re.search(r"(\d+)", ref)
+    return int(m.group(1)) if m else None
 
 
 def _scored(producer_out: str, artifact_type: str, artifact_json: str, scorer: ScorerAgent,
@@ -63,6 +70,11 @@ def run_full_pipeline(
             bible.upsert_character(ch)
         outline = OutlinerAgent(provider, agent("outliner")).run((concept, world, chars))
         bible.set_outline(outline)
+        for entry in outline.foreshadow_ledger:
+            if not any(f.id == entry.id for f in bible.list_foreshadow()):
+                bible.add_foreshadow(Foreshadow(
+                    id=entry.id, description=entry.description,
+                    planted_ch=_parse_ch(entry.planted_in), status=ForeshadowStatus.OPEN))
         if on_gate:
             on_gate("outline", outline)
         chapter_no = 0

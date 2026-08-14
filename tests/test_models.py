@@ -2,8 +2,9 @@ import pytest
 from pydantic import ValidationError
 
 from novel.models import (
-    Arc,  # noqa: F401
+    Arc,
     ChapterBeat,
+    ChapterOutline,
     Character,
     CharacterState,
     Concept,
@@ -11,9 +12,10 @@ from novel.models import (
     EventStatus,  # noqa: F401
     Faction,
     Foreshadow,  # noqa: F401
+    ForeshadowLedgerEntry,
     ForeshadowStatus,
     Location,
-    Outline,  # noqa: F401
+    Outline,
     ReviewDimension,
     ReviewScore,
     World,
@@ -42,6 +44,21 @@ def test_chapter_beat_carries_foreshadow_refs():
                     emotional_turn="doubt->resolve", characters=["c1"],
                     plants=["f1"], payoffs=[])
     assert b.plants == ["f1"]
+
+
+def test_outline_v2_shape_uses_renamed_fields_and_ledger():
+    beat = ChapterBeat(beat_id="c01-b01", pov="c1", setting="tavern", event="meet",
+                       emotional_turn="doubt", characters=["c1"])
+    arc = Arc(arc_name="Act I", chapters=[ChapterOutline(chapter_no=1, chapter_title="T1", beats=[beat])])
+    entry = ForeshadowLedgerEntry(id="fs-01", planted_in="c01-b01", paid_off_in="c14-b02",
+                                  description="the bell")
+    outline = Outline(arcs=[arc], foreshadow_ledger=[entry])
+    assert outline.arcs[0].arc_name == "Act I"
+    assert outline.arcs[0].chapters[0].chapter_no == 1
+    assert outline.arcs[0].chapters[0].chapter_title == "T1"
+    assert outline.arcs[0].chapters[0].beats[0].beat_id == "c01-b01"
+    assert outline.foreshadow_ledger[0].id == "fs-01"
+    assert outline.foreshadow_ledger[0].planted_in == "c01-b01"
 
 def test_foreshadow_status_enum():
     assert ForeshadowStatus("open") == ForeshadowStatus.OPEN
