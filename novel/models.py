@@ -31,13 +31,26 @@ class StyleGuide(BaseModel):
     prose_notes: str = ""
 
 
+class Faction(BaseModel):
+    name: str
+    ideology: str = ""
+    resources: str = ""
+    conflict_with: str = ""
+
+
+class Location(BaseModel):
+    name: str
+    description: str = ""
+    narrative_function: str = ""
+
+
 class World(BaseModel):
     setting: str
     era: str = ""
     rules: list[str] = Field(default_factory=list)
     power_system: str = ""
-    factions: list[str] = Field(default_factory=list)
-    locations: list[str] = Field(default_factory=list)
+    factions: list[Faction] = Field(default_factory=list)
+    locations: list[Location] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
 
 

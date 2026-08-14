@@ -40,3 +40,37 @@ def test_outliner(tmp_path):
     p, concept, world, chars = _prov()
     out = OutlinerAgent(p, ModelConfig("anthropic", "claude")).run((concept, world, chars))
     assert out is not None
+
+
+def test_strategist_build_messages_uses_v2_prompt():
+    p, *_ = _prov()
+    agent = StrategistAgent(p, ModelConfig("zhipu", "x"))
+    msgs = agent.build_messages("a thief steals time")
+    assert "senior development executive" in msgs[0]["content"]
+    assert msgs[0]["content"].rstrip().endswith("No preamble, no markdown fences.")
+    assert "<premise>" in msgs[1]["content"]
+    assert "a thief steals time" in msgs[1]["content"]
+    assert msgs[1]["content"].rstrip().endswith("</premise>")
+
+
+def test_worldbuilder_build_messages_uses_v2_prompt():
+    p, concept, _world, _chars = _prov()
+    agent = WorldbuilderAgent(p, ModelConfig("anthropic", "claude"))
+    msgs = agent.build_messages(concept)
+    assert "worldbuilding architect" in msgs[0]["content"]
+    assert "Output ONLY the JSON object." in msgs[0]["content"]
+    assert "<concept>" in msgs[1]["content"]
+    assert concept.model_dump_json() in msgs[1]["content"]
+    assert msgs[1]["content"].rstrip().endswith("</concept>")
+
+
+def test_character_build_messages_uses_v2_prompt():
+    p, concept, world, _chars = _prov()
+    agent = CharacterAgent(p, ModelConfig("anthropic", "claude"))
+    msgs = agent.build_messages((concept, world))
+    assert "casting director" in msgs[0]["content"]
+    assert '"id"' in msgs[0]["content"]
+    assert "<concept>" in msgs[1]["content"]
+    assert "<world>" in msgs[1]["content"]
+    assert concept.model_dump_json() in msgs[1]["content"]
+    assert world.model_dump_json() in msgs[1]["content"]
