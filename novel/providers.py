@@ -130,6 +130,8 @@ class LiteLLMProvider:
             kwargs["api_base"] = cfg.api_base
         if cfg.api_key:
             kwargs["api_key"] = cfg.api_key
+        if cfg.timeout is not None:
+            kwargs["timeout"] = cfg.timeout     # slower local models / long generations
         resp = litellm.completion(**kwargs)
         return str(resp["choices"][0]["message"]["content"])
 

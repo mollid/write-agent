@@ -226,6 +226,7 @@ generation:
 | `models.<agent>.model` | 服务商的实际模型名称。 |
 | `models.<agent>.api_base` | （可选）OpenAI 兼容接口的 base URL，用于接入 agnes、哈基米API站、ollama 等任意兼容端点。也写作 `base_url`。 |
 | `models.<agent>.api_key` | （可选）该模型的 API key。**写入后请勿把 `project.config.yaml` 提交进 git**（本仓库已默认忽略它）。 |
+| `models.<agent>.timeout` | （可选）单次调用超时秒数。本地大模型推理慢时建议设大（如 `300`）；省略则用 litellm 默认。 |
 | `models.default` | 未单独指定模型的智能体的默认配置。 |
 | `thresholds.score_min` | 每个评分维度的最低通过分数，默认 `80`。 |
 | `thresholds.max_retries` | 未通过评分时的最大定向重写次数，默认 `3`。 |
@@ -269,7 +270,7 @@ language: zh
 
 ```yaml
 models:
-  default: { provider: openai, model: qwen2.5:14b, api_base: http://localhost:11434/v1, api_key: local }
+  default: { provider: openai, model: qwen2.5:14b, api_base: http://localhost:11434/v1, api_key: local, timeout: 300 }
   scorer:  { provider: deepseek, model: deepseek-v4-pro }       # 评分可继续用云，更稳
 thresholds:
   score_min: 80
@@ -284,8 +285,8 @@ language: zh
 
 - **`api_key` 填占位字符串**：本地服务通常不验证 key，但 OpenAI 客户端要求该字段非空，填任意值（如 `local`）即可。
 - **`model` 用本地实际名**：Ollama 取 `ollama list` 里的 tag（如 `qwen2.5:14b`）；vLLM 取启动 `--model` 的名字；LM Studio 取其模型标识。
-- **可混本地与云**：例如 `writer` 用本地 14B 模型跑创作、`scorer` 用 deepseek 云做评分。
-- **超时**：本地推理（尤其大模型）可能很慢，单次调用可能超过 litellm 默认超时。若遇到超时失败，可加 `timeout` 配置项（当前未暴露；需要时可向本项目提一句，加上即可）。
+- **`timeout` 给本地慢推理**：大模型生成可能久，建议设 `timeout: 300`（秒）或更大；省略则用 litellm 默认（可能不够）。
+- **可混本地与云**：例如 `writer` 用本地 14B 模型跑创作、`scorer` 用 deepseek 云做评分；`timeout` 按 agent 各自配置。
 - **离线环境**：无网时 litellm 启动期会尝试拉取模型价目表并失败回退为本地副本，仅打印一条警告，不影响调用。
 - 也支持 Ollama 原生协议（`provider: ollama, model: <tag>`），但需额外给 litellm 配置 ollama base，不如走 OpenAI 兼容接口统一简便，本节推荐后者。
 

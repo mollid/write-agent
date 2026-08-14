@@ -1,4 +1,4 @@
-from novel.config import load_config
+from novel.config import ModelConfig, load_config
 from novel.project import NovelProject
 
 
@@ -48,5 +48,19 @@ def test_model_config_api_base_and_api_key(tmp_path):
     mc = cfg.model_for("outliner")
     assert mc.api_base == "https://api.gemai.cc/v1"
     assert mc.api_key == "sk-xyz"
-    # base_url alias works too
     assert cfg.model_for("default").api_base is None
+
+
+def test_model_config_timeout(tmp_path):
+    proj = NovelProject.scaffold("n", genre="g", root=tmp_path)
+    proj.config_path.write_text(
+        "models:\n"
+        "  default: { provider: ollama, model: qwen2.5:14b,\n"
+        "            api_base: http://localhost:11434/v1, timeout: 300 }\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(proj.config_path)
+    mc = cfg.model_for("default")
+    assert mc.timeout == 300
+    # timeout absent -> None (litellm default)
+    assert ModelConfig("openai", "x").timeout is None

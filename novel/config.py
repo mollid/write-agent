@@ -12,6 +12,7 @@ class ModelConfig:
     model: str
     api_base: str | None = None      # OpenAI-compatible base URL override (e.g. https://apihub.agnes-ai.com/v1)
     api_key: str | None = None       # secret; will be written into per-project project.config.yaml (which is gitignored)
+    timeout: float | None = None     # per-call timeout in seconds; None = litellm default (use for slow local models)
 
 
 @dataclass
@@ -50,6 +51,7 @@ def load_config(path: Path) -> ProjectConfig:
             model=m.get("model", ""),
             api_base=m.get("api_base") or m.get("base_url"),
             api_key=m.get("api_key"),
+            timeout=m.get("timeout"),
         )
         for name, m in (raw.get("models") or {}).items()
     }
