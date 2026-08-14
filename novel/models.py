@@ -138,14 +138,15 @@ class Event(BaseModel):
     foreshadow_tags: list[str] = Field(default_factory=list)
 
 
-class ReviewDimension(BaseModel):
-    name: str
+class DimensionScore(BaseModel):
     score: int
     critique: str = ""
 
 
 class ReviewScore(BaseModel):
-    artifact_ref: str
-    attempt: int
-    dimensions: list[ReviewDimension]
-    passed: bool = False
+    artifact_type: str = ""
+    scores: dict[str, DimensionScore] = Field(default_factory=dict)
+    overall: int = 0
+    summary: str = ""
+    attempt: int = 1          # pipeline-managed
+    passed: bool = False      # set by decide()

@@ -36,8 +36,8 @@ def _demo_provider() -> ModelProvider:
         ChapterOutline,
         Character,
         Concept,
+        DimensionScore,
         Outline,
-        ReviewDimension,
         ReviewScore,
         World,
     )
@@ -51,8 +51,8 @@ def _demo_provider() -> ModelProvider:
         foreshadow_ledger=[])
     chars = [Character(id="c1", slug="ara", name="Ara", role="protagonist",
                        backstory="orphan", motivation="revenge", arc="a")]
-    passing = ReviewScore(artifact_ref="x", attempt=1,
-                          dimensions=[ReviewDimension(name="q", score=90)], passed=True)
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
     return FakeProvider(responses={
         "strategist": concept, "worldbuilder": World(setting="city of bells"),
         "character": chars, "outliner": outline,

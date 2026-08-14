@@ -8,6 +8,7 @@ from novel.models import (
     Character,
     CharacterState,
     Concept,
+    DimensionScore,
     Event,  # noqa: F401
     EventStatus,  # noqa: F401
     Faction,
@@ -16,7 +17,6 @@ from novel.models import (
     ForeshadowStatus,
     Location,
     Outline,
-    ReviewDimension,
     ReviewScore,
     World,
 )
@@ -64,10 +64,11 @@ def test_foreshadow_status_enum():
     assert ForeshadowStatus("open") == ForeshadowStatus.OPEN
 
 def test_review_score_pass_logic_data():
-    rs = ReviewScore(artifact_ref="outline", attempt=1,
-                     dimensions=[ReviewDimension(name="structure", score=85, critique=""),
-                                 ReviewDimension(name="pacing", score=70, critique="slow")])
-    assert min(d.score for d in rs.dimensions) == 70
+    rs = ReviewScore(artifact_type="outline",
+                     scores={"structure": DimensionScore(score=85, critique=""),
+                             "pacing": DimensionScore(score=70, critique="slow")})
+    assert rs.artifact_type == "outline"
+    assert min(ds.score for ds in rs.scores.values()) == 70
 
 
 def test_world_factions_and_locations_are_typed_objects():

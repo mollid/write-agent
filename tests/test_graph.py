@@ -7,11 +7,11 @@ from novel.models import (
     Character,
     CharacterState,
     Concept,
+    DimensionScore,
     Event,
     ForeshadowLedgerEntry,
     ForeshadowStatus,
     Outline,
-    ReviewDimension,
     ReviewScore,
     World,
 )
@@ -35,8 +35,8 @@ def test_smoke_three_chapter_micro_novel(tmp_path):
         ChapterOutline(chapter_no=i, chapter_title=f"T{i}", beats=[beat]) for i in range(1, 4)])])
     chars = [Character(id="c1", slug="ara", name="Ara", role="protagonist",
                        backstory="b", motivation="m", arc="a")]
-    passing = ReviewScore(artifact_ref="x", attempt=1,
-                          dimensions=[ReviewDimension(name="q", score=90)], passed=True)
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
     provider = FakeProvider(responses={
         "strategist": concept,
         "worldbuilder": World(setting="city"),
@@ -84,8 +84,8 @@ def _one_chapter_setup(tmp_path):
 
 def test_scorer_cap_escalates_no_hard_pass(tmp_path):
     proj, bible, vector, concept, _beat, outline, chars = _one_chapter_setup(tmp_path)
-    failing = ReviewScore(artifact_ref="x", attempt=1,
-                          dimensions=[ReviewDimension(name="q", score=40)], passed=False)
+    failing = ReviewScore(artifact_type="chapter", overall=40,
+                          scores={"beat_adherence": DimensionScore(score=40, critique="weak")})
     provider = FakeProvider(responses={
         "strategist": concept,
         "worldbuilder": World(setting="city"),
@@ -105,8 +105,8 @@ def test_scorer_cap_escalates_no_hard_pass(tmp_path):
 
 def test_scorer_cap_human_approves(tmp_path):
     proj, bible, vector, concept, _beat, outline, chars = _one_chapter_setup(tmp_path)
-    failing = ReviewScore(artifact_ref="x", attempt=1,
-                          dimensions=[ReviewDimension(name="q", score=40)], passed=False)
+    failing = ReviewScore(artifact_type="chapter", overall=40,
+                          scores={"beat_adherence": DimensionScore(score=40, critique="weak")})
     provider = FakeProvider(responses={
         "strategist": concept,
         "worldbuilder": World(setting="city"),
@@ -127,8 +127,8 @@ def test_scorer_cap_human_approves(tmp_path):
 
 def test_voice_mannerisms_and_events_persist(tmp_path):
     proj, bible, vector, concept, _beat, outline, chars = _one_chapter_setup(tmp_path)
-    passing = ReviewScore(artifact_ref="x", attempt=1,
-                          dimensions=[ReviewDimension(name="q", score=90)], passed=True)
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
     provider = FakeProvider(responses={
         "strategist": concept,
         "worldbuilder": World(setting="city"),
@@ -166,8 +166,8 @@ def test_foreshadow_ledger_registered_on_setup(tmp_path):
             id="fs-99", planted_in="c03-b02", paid_off_in="c10-b01",
             description="the cracked bell")],
     )
-    passing = ReviewScore(artifact_ref="x", attempt=1,
-                          dimensions=[ReviewDimension(name="q", score=90)], passed=True)
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
     provider = FakeProvider(responses={
         "strategist": concept,
         "worldbuilder": World(setting="city"),
