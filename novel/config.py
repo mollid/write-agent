@@ -25,6 +25,7 @@ class Thresholds:
 class Generation:
     human_gate_every_n_chapters: int = 1
     context_token_budget: int = 24000
+    min_chapter_chars: int = 50    # resume check: shorter chapter files count as incomplete
 
 
 @dataclass
@@ -63,6 +64,7 @@ def load_config(path: Path) -> ProjectConfig:
         generation=Generation(
             human_gate_every_n_chapters=gen.get("human_gate_every_n_chapters", 1),
             context_token_budget=gen.get("context_token_budget", 24000),
+            min_chapter_chars=gen.get("min_chapter_chars", 50),
         ),
         language=str(raw.get("language", "en")).strip().lower() or "en",
     )
