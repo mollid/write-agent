@@ -93,3 +93,62 @@ def test_torn_trailing_line_in_reviews_jsonl(tmp_path):
     assert [r.chapter for r in reviews.list_all()] == [1]
     assert is_chapter_complete(proj, reviews, 1) is True
     assert next_start_chapter(proj, reviews) == 2
+
+
+def _run_pipeline(tmp_path, prose: str, target: int, start: int = 1,
+                  proj: NovelProject | None = None):
+    """Demo-mode pipeline run with FakeProvider; pass `proj` back in to rerun."""
+    from novel.graph import run_full_pipeline
+    from novel.models import Arc, ChapterBeat, ChapterOutline, Character, Concept, \
+        DimensionScore, Outline, ReviewScore, World
+    from novel.providers import FakeProvider, ModelConfig
+    from novel.store.bible import StoryBible
+    from novel.store.vector import VectorMemory, hash_embed
+
+    if proj is None:
+        proj = NovelProject.scaffold("n", genre="fantasy", root=tmp_path)
+    bible = StoryBible(proj)
+    vector = VectorMemory(proj, embed=hash_embed)
+    concept = Concept(logline="L", genre="fantasy", tone="grim", themes=["x"],
+                      target_length_words=9000, audience="a")
+    beat = ChapterBeat(pov="Ara", setting="tavern", event="meet informant",
+                       emotional_turn="doubt", characters=["c1"])
+    outline = Outline(arcs=[Arc(arc_name="A", chapters=[
+        ChapterOutline(chapter_no=i, chapter_title=f"T{i}", beats=[beat])
+        for i in range(1, target + 1)])])
+    chars = [Character(id="c1", slug="ara", name="Ara", role="protagonist",
+                       backstory="b", motivation="m", arc="a")]
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
+    provider = FakeProvider(responses={
+        "strategist": concept, "worldbuilder": World(setting="city"),
+        "character": chars, "outliner": outline,
+        "writer": prose, "continuity": "[]", "editor": prose, "scorer": passing,
+        "extractor": {"character_states": {}, "voice_samples": {}, "mannerisms_used": {},
+                      "key_events": [], "threads_advanced": [], "new_information_revealed": []},
+    }, tag_key="agent")
+    cfg_map = {name: ModelConfig("zhipu", "x") for name in
+               ["strategist", "worldbuilder", "character", "outliner", "writer",
+                "continuity", "editor", "scorer", "extractor"]}
+    state = run_full_pipeline(provider=provider, cfg_map=cfg_map, bible=bible, vector=vector,
+                              proj=proj, premise="a thief", target_chapters=target,
+                              start_chapter=start)
+    return proj, state
+
+
+def test_atomic_write_no_tmp_residue(tmp_path):
+    proj, state = _run_pipeline(tmp_path, LONG, target=1)
+    assert state.error is None
+    assert (proj.root / "chapters" / "001.md").read_text(encoding="utf-8") == LONG
+    assert list((proj.root / "chapters").glob("*.tmp")) == []
+
+
+def test_stale_tmp_cleaned_on_rerun(tmp_path):
+    proj, state = _run_pipeline(tmp_path, LONG, target=1)
+    assert state.error is None
+    # a crashed run left a partial tmp behind; the next pipeline start must remove it
+    (proj.root / "chapters" / ".002.md.tmp").write_text("partial", encoding="utf-8")
+    proj, state2 = _run_pipeline(tmp_path, LONG, target=2, start=2, proj=proj)
+    assert state2.error is None
+    assert (proj.root / "chapters" / "002.md").read_text(encoding="utf-8") == LONG
+    assert list((proj.root / "chapters").glob("*.tmp")) == []

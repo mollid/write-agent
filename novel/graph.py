@@ -102,6 +102,10 @@ def run_full_pipeline(
     scorer = ScorerAgent(provider, agent("scorer"))
     reviews = ReviewStore(proj)
 
+    # stale tmp files from a crashed run must never be mistaken for chapters
+    for stale in (proj.root / "chapters").glob(".*.md.tmp"):
+        stale.unlink()
+
     # --- GENERATION ---
     for arc in outline.arcs:
         for ch_out in arc.chapters:
@@ -153,8 +157,6 @@ def run_full_pipeline(
                 emit({"type": "stage", "stage": "editor", "chapter": chapter_no})
                 prose = EditorAgent(provider, agent("editor")).run(prose)
             # persist
-            (proj.root / "chapters" / f"{chapter_no:03d}.md").write_text(prose, encoding="utf-8")
-            vector.add_chapter(chapter_no, prose)
             emit({"type": "stage", "stage": "extractor", "chapter": chapter_no})
             # extract updates -> apply to bible
             raw_chars = [bible.get_character(c) for c in beat.characters] if beat else []
@@ -200,7 +202,14 @@ def run_full_pipeline(
                         id=target.id, description=target.description,
                         planted_ch=target.planted_ch, payoff_ch=chapter_no,
                         status=ForeshadowStatus.PAID_OFF))
+            vector.add_chapter(chapter_no, prose)
             vector.add_summary("chapter", f"ch{chapter_no}", prose[:300])
+            # atomic write last: the file's appearance is the chapter's commit point
+            # (score gate, extraction, bible and memory updates are all on disk already)
+            chapters_dir = proj.root / "chapters"
+            tmp = chapters_dir / f".{chapter_no:03d}.md.tmp"
+            tmp.write_text(prose, encoding="utf-8")
+            tmp.replace(chapters_dir / f"{chapter_no:03d}.md")
             emit({"type": "chapter_done", "chapter": chapter_no})
             if on_gate:
                 on_gate("chapter", chapter_no)
