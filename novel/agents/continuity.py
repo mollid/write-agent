@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from novel.agents.base import Agent
+from novel.providers import _extract_json
 
 
 class ContinuityAgent(Agent[tuple[str, str], list[str]]):
@@ -19,6 +20,19 @@ class ContinuityAgent(Agent[tuple[str, str], list[str]]):
         ]
 
     def run(self, inputs: tuple[str, str]) -> list[str]:
-        text = self.provider.complete(self.build_messages(inputs), self.cfg)
-        data = json.loads(text)
-        return [str(x) for x in data]
+        msgs = self.build_messages(inputs)
+        last_err: Exception | None = None
+        for _attempt in range(self.max_retries + 1):
+            try:
+                text = self.provider.complete(msgs, self.cfg)
+                data = json.loads(_extract_json(text))
+                return [str(x) for x in data]
+            except ValueError as e:
+                last_err = e
+                msgs = msgs + [
+                    {"role": "assistant", "content": "<invalid output>"},
+                    {"role": "user", "agent": self.name,
+                     "content": f"Your output was invalid JSON: {e}. Return ONLY a JSON array of issue strings."},
+                ]
+        assert last_err is not None
+        raise last_err

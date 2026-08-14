@@ -36,6 +36,36 @@ def _jsonable(obj: object) -> object:
     raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
 
 
+def _extract_json(text: str) -> str:
+    """Strip markdown fences / surrounding prose; return the outermost JSON payload.
+
+    Real models often wrap JSON in ```json ... ``` or add prose around it. This picks
+    the outermost object (``{``) or array (``[``) by whichever opens first, then takes
+    up to the last matching closer.
+    """
+    s = text.strip()
+    if s.startswith("```"):
+        s = s.split("\n", 1)[1] if "\n" in s else s[3:]
+        s = s.removesuffix("```")
+        s = s.strip()
+    obj_start = s.find("{")
+    arr_start = s.find("[")
+    if obj_start == -1:
+        start, close = arr_start, "]"
+    elif arr_start == -1:
+        start, close = obj_start, "}"
+    elif arr_start < obj_start:
+        start, close = arr_start, "]"
+    else:
+        start, close = obj_start, "}"
+    if start == -1:
+        return s
+    end = s.rfind(close)
+    if end > start:
+        return s[start:end + 1]
+    return s
+
+
 class FakeProvider:
     """Deterministic provider for tests. Responses keyed by agent name in messages."""
 
@@ -99,4 +129,4 @@ class LiteLLMProvider:
             }
         ]
         text = self.complete(sys_msg + messages, cfg, seed=seed)
-        return schema.model_validate_json(text)
+        return schema.model_validate_json(_extract_json(text))
