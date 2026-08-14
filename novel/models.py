@@ -55,11 +55,17 @@ class World(BaseModel):
 
 
 class CharacterState(BaseModel):
-    location: str = ""
-    knowledge: list[str] = Field(default_factory=list)
-    relationships: dict[str, str] = Field(default_factory=dict)
-    emotion: str = ""
-    inventory: list[str] = Field(default_factory=list)
+    emotional_state: str = ""
+    physical_state: str = ""
+    knowledge_gained: list[str] = Field(default_factory=list)
+    relationships_shifted: dict[str, str] = Field(default_factory=dict)
+    location_end: str = ""
+
+
+class KeyEvent(BaseModel):
+    event: str
+    significance: str = ""
+    affected_characters: list[str] = Field(default_factory=list)
 
 
 class Mannerism(BaseModel):

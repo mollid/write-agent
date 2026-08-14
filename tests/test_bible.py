@@ -19,9 +19,9 @@ def test_character_upsert_and_state_update(tmp_path):
     ch = Character(id="c1", slug="ara", name="Ara", role="protagonist", backstory="b",
                    motivation="m", arc="a")
     b.upsert_character(ch)
-    ch.state.emotion = "angry"
+    ch.state.emotional_state = "angry"
     b.upsert_character(ch)
-    assert b.get_character("c1").state.emotion == "angry"
+    assert b.get_character("c1").state.emotional_state == "angry"
 
 def test_foreshadow_and_events(tmp_path):
     b = _bible(tmp_path)

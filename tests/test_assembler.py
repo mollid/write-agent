@@ -23,7 +23,7 @@ def _seed(tmp_path):
     b.set_concept(Concept(logline="L", genre="fantasy", tone="grim", themes=[], target_length_words=10000, audience="a"))
     b.set_world(World(setting="city"))
     b.upsert_character(Character(id="c1", slug="ara", name="Ara", role="protagonist", backstory="b",
-                                 motivation="m", arc="a", state=CharacterState(location="tavern"),
+                                 motivation="m", arc="a", state=CharacterState(location_end="tavern"),
                                  mannerisms=[Mannerism(text="bites nail", used_count=5),
                                              Mannerism(text="sighs", used_count=0)]))
     beat = ChapterBeat(pov="Ara", setting="tavern", event="meet", emotional_turn="doubt", characters=["c1"])

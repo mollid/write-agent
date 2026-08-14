@@ -59,7 +59,8 @@ def _demo_provider() -> ModelProvider:
         "writer": "Ara stepped into the tavern. The thief's work was about to begin.",
         "continuity": "[]", "editor": "Ara stepped into the tavern.",
         "scorer": passing,
-        "extractor": {"character_states": {}, "voice_samples": {}, "mannerisms_used": {}, "events": []},
+        "extractor": {"character_states": {}, "voice_samples": {}, "mannerisms_used": {},
+              "key_events": [], "threads_advanced": [], "new_information_revealed": []},
     }, tag_key="agent")
 
 
