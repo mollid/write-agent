@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -15,7 +16,7 @@ from novel.agents.writer import WriterAgent
 from novel.config import ModelConfig
 from novel.memory.assembler import assemble_context
 from novel.memory.extractor import extract_updates
-from novel.models import Foreshadow, ForeshadowStatus, Mannerism, ReviewScore
+from novel.models import Event, Foreshadow, ForeshadowStatus, Mannerism, ReviewScore
 from novel.project import NovelProject
 from novel.providers import ModelProvider
 from novel.scorer_rubrics import apply_review, decide
@@ -30,6 +31,12 @@ class PipelineState:
     last_review: ReviewScore | None = None
     human_overrides: dict[str, object] = field(default_factory=dict)
     error: str | None = None
+
+
+def _parse_ch(ref: str) -> int | None:
+    """Best-effort: 'c03-b01' / 'ch3' -> 3."""
+    m = re.search(r"(\d+)", ref)
+    return int(m.group(1)) if m else None
 
 
 def _scored(producer_out: str, artifact_type: str, artifact_json: str, scorer: ScorerAgent,
@@ -63,6 +70,11 @@ def run_full_pipeline(
             bible.upsert_character(ch)
         outline = OutlinerAgent(provider, agent("outliner")).run((concept, world, chars))
         bible.set_outline(outline)
+        for entry in outline.foreshadow_ledger:
+            if not any(f.id == entry.id for f in bible.list_foreshadow()):
+                bible.add_foreshadow(Foreshadow(
+                    id=entry.id, description=entry.description,
+                    planted_ch=_parse_ch(entry.planted_in), status=ForeshadowStatus.OPEN))
         if on_gate:
             on_gate("outline", outline)
         chapter_no = 0
@@ -132,17 +144,21 @@ def run_full_pipeline(
                 if ch_obj:
                     ch_obj.voice_fingerprint[f"sample_{chapter_no}"] = sample
                     bible.upsert_character(ch_obj)
-            for cid, mannerism_text in upd.mannerisms_used.items():
+            for cid, man_list in upd.mannerisms_used.items():
                 ch_obj = bible.get_character(cid)
-                if ch_obj:
-                    existing = next((m for m in ch_obj.mannerisms if m.text == mannerism_text), None)
+                if not ch_obj:
+                    continue
+                for man in man_list:
+                    existing = next((m for m in ch_obj.mannerisms if m.text == man), None)
                     if existing:
                         existing.used_count += 1
                     else:
-                        ch_obj.mannerisms.append(Mannerism(text=mannerism_text, used_count=1))
-                    bible.upsert_character(ch_obj)
-            for e in upd.events:
-                bible.append_event(e)
+                        ch_obj.mannerisms.append(Mannerism(text=man, used_count=1))
+                bible.upsert_character(ch_obj)
+            for i, ke in enumerate(upd.key_events):
+                bible.append_event(Event(
+                    id=f"evt_{chapter_no}_{i + 1}", chapter=chapter_no, summary=ke.event,
+                    characters=list(ke.affected_characters)))
             # register foreshadowing from the beat
             for plant in beat.plants:
                 fid = f"plant-{plant}"

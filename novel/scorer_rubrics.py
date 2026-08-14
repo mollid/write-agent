@@ -12,11 +12,11 @@ RUBRICS: dict[str, list[str]] = {
 
 
 def decide(score: ReviewScore, score_min: int) -> bool:
-    score.passed = all(d.score >= score_min for d in score.dimensions)
+    score.passed = all(ds.score >= score_min for ds in score.scores.values()) if score.scores else False
     return score.passed
 
 
 def apply_review(score: ReviewScore, _existing: str) -> str:
     """Format dimension-level critique feedback to feed back to the producer."""
-    low = [d for d in score.dimensions if d.critique]
-    return "; ".join(f"{d.name}({d.score}): {d.critique}" for d in low)
+    return "; ".join(f"{name}({ds.score}): {ds.critique}"
+                     for name, ds in score.scores.items() if ds.critique)

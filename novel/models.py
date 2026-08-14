@@ -31,22 +31,41 @@ class StyleGuide(BaseModel):
     prose_notes: str = ""
 
 
+class Faction(BaseModel):
+    name: str
+    ideology: str = ""
+    resources: str = ""
+    conflict_with: str = ""
+
+
+class Location(BaseModel):
+    name: str
+    description: str = ""
+    narrative_function: str = ""
+
+
 class World(BaseModel):
     setting: str
     era: str = ""
     rules: list[str] = Field(default_factory=list)
     power_system: str = ""
-    factions: list[str] = Field(default_factory=list)
-    locations: list[str] = Field(default_factory=list)
+    factions: list[Faction] = Field(default_factory=list)
+    locations: list[Location] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
 
 
 class CharacterState(BaseModel):
-    location: str = ""
-    knowledge: list[str] = Field(default_factory=list)
-    relationships: dict[str, str] = Field(default_factory=dict)
-    emotion: str = ""
-    inventory: list[str] = Field(default_factory=list)
+    emotional_state: str = ""
+    physical_state: str = ""
+    knowledge_gained: list[str] = Field(default_factory=list)
+    relationships_shifted: dict[str, str] = Field(default_factory=dict)
+    location_end: str = ""
+
+
+class KeyEvent(BaseModel):
+    event: str
+    significance: str = ""
+    affected_characters: list[str] = Field(default_factory=list)
 
 
 class Mannerism(BaseModel):
@@ -70,6 +89,7 @@ class Character(BaseModel):
 
 
 class ChapterBeat(BaseModel):
+    beat_id: str = ""
     pov: str
     setting: str
     event: str
@@ -80,19 +100,26 @@ class ChapterBeat(BaseModel):
 
 
 class ChapterOutline(BaseModel):
-    id: str
-    title: str = ""
+    chapter_no: int
+    chapter_title: str = ""
     beats: list[ChapterBeat] = Field(default_factory=list)
 
 
 class Arc(BaseModel):
-    id: str
-    title: str
+    arc_name: str
     chapters: list[ChapterOutline] = Field(default_factory=list)
+
+
+class ForeshadowLedgerEntry(BaseModel):
+    id: str
+    planted_in: str = ""
+    paid_off_in: str = ""
+    description: str = ""
 
 
 class Outline(BaseModel):
     arcs: list[Arc] = Field(default_factory=list)
+    foreshadow_ledger: list[ForeshadowLedgerEntry] = Field(default_factory=list)
 
 
 class Foreshadow(BaseModel):
@@ -117,14 +144,15 @@ class Event(BaseModel):
     foreshadow_tags: list[str] = Field(default_factory=list)
 
 
-class ReviewDimension(BaseModel):
-    name: str
+class DimensionScore(BaseModel):
     score: int
     critique: str = ""
 
 
 class ReviewScore(BaseModel):
-    artifact_ref: str
-    attempt: int
-    dimensions: list[ReviewDimension]
-    passed: bool = False
+    artifact_type: str = ""
+    scores: dict[str, DimensionScore] = Field(default_factory=dict)
+    overall: int = 0
+    summary: str = ""
+    attempt: int = 1          # pipeline-managed
+    passed: bool = False      # set by decide()

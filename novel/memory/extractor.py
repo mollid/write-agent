@@ -5,8 +5,61 @@ from dataclasses import dataclass, field
 from pydantic import BaseModel, ConfigDict, Field
 
 from novel.config import ModelConfig
-from novel.models import Character, CharacterState, Event
+from novel.models import Character, CharacterState, KeyEvent
 from novel.providers import ModelProvider
+
+EXTRACTOR_SYSTEM = """\
+You are a narrative state-tracker maintaining a living story database. You extract only what is explicitly evidenced in the text—never infer beyond what the chapter shows.
+
+## Task
+Extract structured updates from the chapter below to update the persistent story state.
+
+## Output Schema (strict JSON)
+{
+  "character_states": {
+    "<character_id>": {
+      "emotional_state": "...",
+      "physical_state": "...",
+      "knowledge_gained": ["..."],
+      "relationships_shifted": {"<other_id>": "description of shift"},
+      "location_end": "where they are at chapter's end"
+    }
+  },
+  "voice_samples": {
+    "<character_id>": "1–2 verbatim sentences from the chapter that best capture this character's voice"
+  },
+  "mannerisms_used": {
+    "<character_id>": ["verbal tic or physical habit observed in this chapter"]
+  },
+  "key_events": [
+    {"event": "...", "significance": "...", "affected_characters": ["<id>"]}
+  ],
+  "threads_advanced": ["foreshadow_id or brief description of thread moved forward"],
+  "new_information_revealed": ["..."]
+}
+
+## Critical Rules
+1. **ID discipline**: All dict keys in `character_states`, `voice_samples`, and `mannerisms_used` MUST be character ids from the roster below. NEVER key by name, role, or any non-roster figure.
+2. **Evidence-based**: Every extracted fact must be directly supported by the text. Do not speculate.
+3. **Completeness**: Include every roster character who appears, speaks, or is directly referenced with new information.
+4. **Brevity**: Each field value should be concise (1–2 sentences max).
+
+## Roster (authoritative character ids)
+{roster_block}
+
+## Output
+Return ONLY the JSON object."""
+
+EXTRACTOR_USER = """\
+<chapter_number>{chapter_no}</chapter_number>
+
+<roster>
+{roster_block}
+</roster>
+
+<prose>
+{prose}
+</prose>"""
 
 
 class _UpdatePayload(BaseModel):
@@ -14,16 +67,20 @@ class _UpdatePayload(BaseModel):
 
     character_states: dict[str, CharacterState] = Field(default_factory=dict)
     voice_samples: dict[str, str] = Field(default_factory=dict)
-    mannerisms_used: dict[str, str] = Field(default_factory=dict)
-    events: list[Event] = Field(default_factory=list)
+    mannerisms_used: dict[str, list[str]] = Field(default_factory=dict)
+    key_events: list[KeyEvent] = Field(default_factory=list)
+    threads_advanced: list[str] = Field(default_factory=list)
+    new_information_revealed: list[str] = Field(default_factory=list)
 
 
 @dataclass
 class ChapterUpdates:
     character_states: dict[str, CharacterState] = field(default_factory=dict)
     voice_samples: dict[str, str] = field(default_factory=dict)
-    mannerisms_used: dict[str, str] = field(default_factory=dict)
-    events: list[Event] = field(default_factory=list)
+    mannerisms_used: dict[str, list[str]] = field(default_factory=dict)
+    key_events: list[KeyEvent] = field(default_factory=list)
+    threads_advanced: list[str] = field(default_factory=list)
+    new_information_revealed: list[str] = field(default_factory=list)
 
 
 def extract_updates(
@@ -33,24 +90,19 @@ def extract_updates(
     provider: ModelProvider,
     cfg: ModelConfig,
 ) -> ChapterUpdates:
-    roster = "\n".join(f"- {c.id} ({c.name})" for c in characters)
+    roster_block = "\n".join(f"- {c.id} ({c.name})" for c in characters)
+    # EXTRACTOR_SYSTEM carries a literal JSON-schema block plus {roster_block} → str.replace
+    # (not .format) to avoid escaping every literal brace.
+    system = EXTRACTOR_SYSTEM.replace("{roster_block}", roster_block)
+    # EXTRACTOR_USER contains only placeholders, no literal JSON braces → .format is safe.
+    user = EXTRACTOR_USER.format(
+        chapter_no=chapter_no,
+        roster_block=roster_block,
+        prose=prose,
+    )
     messages: list[dict[str, object]] = [
-            {
-                "role": "system",
-                "agent": "extractor",
-                "content": (
-                    "Extract structured updates from this chapter. The character_states, "
-                    "voice_samples, and mannerisms_used fields are dicts that MUST be keyed "
-                    "by the character `id` EXACTLY as listed in the roster below; only include "
-                    "characters that appear in the roster (never key by role, name, or a "
-                    "non-roster figure). Also capture the key events that happened."
-                ),
-            },
-        {
-            "role": "user",
-            "agent": "extractor",
-            "content": f"chapter {chapter_no}\ncharacters:\n{roster}\n\nprose:\n{prose}",
-        },
+        {"role": "system", "agent": "extractor", "content": system},
+        {"role": "user", "agent": "extractor", "content": user},
     ]
     payload = provider.complete_structured(messages, _UpdatePayload, cfg)
     assert isinstance(payload, _UpdatePayload)
@@ -58,5 +110,7 @@ def extract_updates(
         character_states=payload.character_states,
         voice_samples=payload.voice_samples,
         mannerisms_used=payload.mannerisms_used,
-        events=payload.events,
+        key_events=payload.key_events,
+        threads_advanced=payload.threads_advanced,
+        new_information_revealed=payload.new_information_revealed,
     )
