@@ -35,14 +35,17 @@ def extract_updates(
 ) -> ChapterUpdates:
     roster = "\n".join(f"- {c.id} ({c.name})" for c in characters)
     messages: list[dict[str, object]] = [
-        {
-            "role": "system",
-            "agent": "extractor",
-            "content": (
-                "Extract structured updates from this chapter: each involved character's new state, "
-                "a voice sample, any mannerism used, and the key events that happened."
-            ),
-        },
+            {
+                "role": "system",
+                "agent": "extractor",
+                "content": (
+                    "Extract structured updates from this chapter. The character_states, "
+                    "voice_samples, and mannerisms_used fields are dicts that MUST be keyed "
+                    "by the character `id` EXACTLY as listed in the roster below; only include "
+                    "characters that appear in the roster (never key by role, name, or a "
+                    "non-roster figure). Also capture the key events that happened."
+                ),
+            },
         {
             "role": "user",
             "agent": "extractor",
