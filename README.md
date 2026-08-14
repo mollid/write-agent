@@ -153,12 +153,16 @@ uv run novel write-chapter 3
 uv run novel write-chapter 1 --project ./my-novel
 ```
 
-章节按三位数字递增保存为 `chapters/001.md`、`chapters/002.md` 等。再次执行命令不会覆盖已有章节，而是从最后一个章节号继续：
+章节按三位数字递增保存为 `chapters/001.md`、`chapters/002.md` 等。再次执行命令时已完成的章节会被自动跳过，从第一个缺失或未完成的章节继续：
 
 ```bash
 # 已有 001.md 到 003.md 时，以下命令会生成 004.md 和 005.md
 uv run novel write-chapter 2
 ```
+
+**中断后续跑**：`write-chapter` 是幂等的——章节文件完整（长度达到 `generation.min_chapter_chars`）且评分留档（`.meta/reviews/reviews.jsonl`）中有通过记录的章节会被自动跳过，空文件或过短的半成品章节会被重写。生成中断后（崩溃、取消、断网）直接重跑同一条命令即可从断点继续，CLI 会打印 `Resuming from chapter N`；CLI 与图形界面的续跑行为完全一致。评分留档功能之前的旧项目没有 `reviews.jsonl`，此时只按文件长度判定，不会被全量重写。
+
+章节采用原子写入（先写 `chapters/.NNN.md.tmp` 临时文件再改名），中断不会留下半截的 `001.md`；极少数情况下磁盘上可能残留 `.001.md.tmp` 之类的临时文件，下次运行时会自动清理，不影响章节识别与导出。
 
 ### 4. 查看故事线索
 
@@ -255,6 +259,7 @@ generation:
 | `thresholds.score_min` | 每个评分维度的最低通过分数，默认 `80`。 |
 | `thresholds.max_retries` | 未通过评分时的最大定向重写次数，默认 `3`。 |
 | `generation.context_token_budget` | 每章工作记忆的上下文 Token 预算，默认 `24000`。 |
+| `generation.min_chapter_chars` | 断点续跑时判定章节「已完成」的最小字符数，默认 `50`（必须低于演示模式章节长度 62）。真实模型项目建议设为实际章节长度的下限（如 `2000`）；设得过大会导致同一章每次续跑都被重写。 |
 | `generation.human_gate_every_n_chapters` | 人工审核频率配置；当前实现会在真实模式的大纲与每章阶段请求批准。 |
 | `language` | 输出语言开关，`en`（默认）或 `zh`。真实模式下所有智能体按此语言生成自然语言文本。 |
 
@@ -420,4 +425,10 @@ uv run novel write-chapter 1 --project ./my-novel
 
 ### 章节没有从预期位置继续
 
-续写仅识别 `chapters/` 下命名为 `001.md`、`002.md` 这类三位数字的章节文件。不要手动修改章节编号格式；需要重新开始时，请创建新项目目录。
+续跑的起点是第一个缺失或未完成的章节：章节文件缺失、文件长度不足 `generation.min_chapter_chars`，或 `.meta/reviews/reviews.jsonl` 中有该章评分记录但无通过（`passed`）记录时，该章会被重写；之前的已完成章节全部跳过。排查建议：
+
+- `generation.min_chapter_chars` 是否设得过大，导致本来完整的章节被判为未完成而反复重写。
+- 该章文件是否为空或过短（如上次中断留下的半成品）。
+- `.meta/reviews/reviews.jsonl` 中是否有该章的 `passed` 记录；评分留档功能之前的旧项目没有该文件，此时只按文件长度判定。
+
+另外，续写仅识别 `chapters/` 下命名为 `001.md`、`002.md` 这类三位数字的章节文件。不要手动修改章节编号格式；需要重新开始时，请创建新项目目录。
