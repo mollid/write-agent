@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Protocol, runtime_checkable
+from typing import ClassVar, Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
@@ -102,13 +102,28 @@ class FakeProvider:
 class LiteLLMProvider:
     """Production provider wrapping litellm. Imported lazily so tests never need it."""
 
-    def __init__(self, api_keys: dict[str, str] | None = None) -> None:
+    # Map config language code -> natural-language output directive (appended as a
+    # system message to every call so all 9 agents emit the same language).
+    _LANG_DIRECTIVES: ClassVar[dict[str, str]] = {
+        "zh": "用简体中文生成所有自然语言文本（包括 JSON 字段值里的 logline、genre、tone、"
+              "themes、audience、summary、critique、issue、event、description 等描述性内容）。"
+              "Enum 既定值（如 id、role 枚举）与 JSON 键名保持英文不变。",
+        "en": "Generate all natural-language text in English.",
+    }
+
+    def __init__(self, api_keys: dict[str, str] | None = None, language: str = "en") -> None:
         self.api_keys = api_keys or {}
+        self.language = language.strip().lower() or "en"
+
+    def _lang_message(self) -> list[dict[str, object]]:
+        directive = self._LANG_DIRECTIVES.get(self.language, self._LANG_DIRECTIVES["en"])
+        return [{"role": "system", "content": f"[Language] {directive}"}]
 
     def complete(self, messages: list[dict[str, object]], cfg: ModelConfig, *, seed: int | None = None) -> str:
         import litellm  # local import: keeps tests import-free of network libs
 
-        resp = litellm.completion(model=f"{cfg.provider}/{cfg.model}", messages=messages, seed=seed)
+        resp = litellm.completion(model=f"{cfg.provider}/{cfg.model}",
+                                  messages=self._lang_message() + messages, seed=seed)
         return str(resp["choices"][0]["message"]["content"])
 
     def complete_structured(

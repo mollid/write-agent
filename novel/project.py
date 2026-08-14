@@ -16,6 +16,7 @@ thresholds:
 generation:
   human_gate_every_n_chapters: 1
   context_token_budget: 24000
+language: en
 """
 
 

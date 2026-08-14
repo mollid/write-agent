@@ -25,7 +25,8 @@ def _load_project(project: Path | None) -> NovelProject:
 def _make_provider(cfg: object) -> ModelProvider:
     from novel.providers import LiteLLMProvider
     if os.environ.get("NOVEL_LIVE") == "1":
-        return LiteLLMProvider()
+        lang = getattr(cfg, "language", "en")
+        return LiteLLMProvider(language=lang)
     return _demo_provider()
 
 

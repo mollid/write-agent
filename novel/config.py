@@ -29,6 +29,7 @@ class ProjectConfig:
     models: dict[str, ModelConfig] = field(default_factory=dict)
     thresholds: Thresholds = field(default_factory=Thresholds)
     generation: Generation = field(default_factory=Generation)
+    language: str = "en"
 
     def model_for(self, agent_name: str) -> ModelConfig:
         if agent_name in self.models:
@@ -54,4 +55,5 @@ def load_config(path: Path) -> ProjectConfig:
             human_gate_every_n_chapters=gen.get("human_gate_every_n_chapters", 1),
             context_token_budget=gen.get("context_token_budget", 24000),
         ),
+        language=str(raw.get("language", "en")).strip().lower() or "en",
     )

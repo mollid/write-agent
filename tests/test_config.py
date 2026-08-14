@@ -17,3 +17,19 @@ def test_unknown_agent_falls_back_to_default(tmp_path):
     cfg = load_config(proj.config_path)
     mc = cfg.model_for("does-not-exist")
     assert mc.provider and mc.model
+
+
+def test_language_defaults_to_en(tmp_path):
+    proj = NovelProject.scaffold("n", genre="g", root=tmp_path)
+    cfg = load_config(proj.config_path)
+    assert cfg.language == "en"
+
+
+def test_language_reads_zh(tmp_path):
+    proj = NovelProject.scaffold("n", genre="g", root=tmp_path)
+    proj.config_path.write_text(
+        "language: zh\nmodels:\n  default: { provider: deepseek, model: x }\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(proj.config_path)
+    assert cfg.language == "zh"
