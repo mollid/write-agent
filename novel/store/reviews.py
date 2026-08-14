@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from novel.models import ReviewRecord
 from novel.project import NovelProject
 
@@ -24,8 +26,14 @@ class ReviewStore:
         out: list[ReviewRecord] = []
         for line in self._path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
-            if line:
+            if not line:
+                continue
+            # Append-only store: a crash mid-append can leave a torn trailing
+            # line; skip unparseable/partial records instead of crashing resume.
+            try:
                 out.append(ReviewRecord.model_validate(json.loads(line)))
+            except (json.JSONDecodeError, ValidationError):
+                continue
         return out
 
     def list_for_chapter(self, chapter: int) -> list[ReviewRecord]:

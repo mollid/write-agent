@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from novel.models import DimensionScore, ReviewRecord
 from novel.project import NovelProject
-from novel.resume import is_chapter_complete
+from novel.resume import is_chapter_complete, next_start_chapter
 from novel.store.reviews import ReviewStore
 
 LONG = "Ara stepped into the tavern and the long night began. " * 2  # > 50 chars
@@ -57,7 +57,6 @@ def test_legacy_project_without_reviews_jsonl(tmp_path):
 
 
 def test_next_start_chapter_positions(tmp_path):
-    from novel.resume import next_start_chapter
     proj = _proj(tmp_path)
     reviews = ReviewStore(proj)
     # empty project -> 1
@@ -80,3 +79,17 @@ def test_next_start_chapter_positions(tmp_path):
     assert next_start_chapter(proj, reviews, min_chars=100) == 1
     # at 50, chapters 1 (62 chars) and 2 (LONG) are complete; 003 is empty -> 3
     assert next_start_chapter(proj, reviews, min_chars=50) == 3
+
+
+def test_torn_trailing_line_in_reviews_jsonl(tmp_path):
+    """A crash mid-append can leave a partial trailing line; resume must not crash."""
+    proj = _proj(tmp_path)
+    reviews = ReviewStore(proj)
+    _write_chapter(proj, 1, LONG)
+    reviews.append(_pass_review(1))
+    # simulate a torn write: append a partial JSON line directly to the file
+    with reviews.path().open("a", encoding="utf-8") as f:
+        f.write('{"chapter": 3, "att')
+    assert [r.chapter for r in reviews.list_all()] == [1]
+    assert is_chapter_complete(proj, reviews, 1) is True
+    assert next_start_chapter(proj, reviews) == 2
