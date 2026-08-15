@@ -64,3 +64,18 @@ def test_model_config_timeout(tmp_path):
     assert mc.timeout == 300
     # timeout absent -> None (litellm default)
     assert ModelConfig("openai", "x").timeout is None
+
+
+def test_min_chapter_chars_default_and_override(tmp_path):
+    from novel.project import NovelProject
+    proj = NovelProject.scaffold("n", genre="fantasy", root=tmp_path)
+    cfg = load_config(proj.config_path)
+    assert cfg.generation.min_chapter_chars == 50  # default, and below demo prose (62 chars)
+
+    text = proj.config_path.read_text(encoding="utf-8")
+    proj.config_path.write_text(
+        text.replace("generation:", "generation:\n  min_chapter_chars: 2000"),
+        encoding="utf-8",
+    )
+    cfg2 = load_config(proj.config_path)
+    assert cfg2.generation.min_chapter_chars == 2000
