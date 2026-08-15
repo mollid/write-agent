@@ -83,6 +83,18 @@ def test_setup_command_feedback_loop_and_quit(tmp_path):
     assert "outline" in canon2
 
 
+def test_setup_command_invalid_choice_does_not_regenerate(tmp_path):
+    runner.invoke(app, ["init", "demo", "--genre", "fantasy", "--root", str(tmp_path)])
+    proj = tmp_path / "demo"
+    # first stage gets one invalid "x" before approving; remaining stages approve directly
+    result = runner.invoke(app, ["--project", str(proj), "setup", "--premise", "a thief"],
+                           input="x\na\na\na\na\n")
+    assert result.exit_code == 0, result.output
+    assert result.output.count("第 1 次生成") == 4  # one generation per stage
+    assert "第 2 次生成" not in result.output  # invalid input must not re-run the agent
+    assert "设定完成" in result.output
+
+
 def test_write_chapter_rewrites_empty_chapter(tmp_path):
     proj = _demo_project(tmp_path)
     runner.invoke(app, ["--project", str(proj), "write-chapter", "2"])

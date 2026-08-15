@@ -59,21 +59,21 @@ def premise(text: str, project: Path | None = _project_opt) -> None:
 
 
 @app.command()
-def setup(premise: str = typer.Option("", "--premise", "-m",
-                                      help="one-line premise (prompted if omitted)"),
+def setup(premise_text: str = typer.Option("", "--premise", "-m",
+                                           help="one-line premise (prompted if omitted)"),
           project: Path | None = _project_opt) -> None:
     """Guided setup (标准模式): approve or refine each stage with natural-language feedback."""
     proj = _load_project(project)
     cfg = load_config(proj.config_path)
     provider = make_provider(cfg)
     bible = StoryBible(proj)
-    from novel.runtime import AGENT_NAMES, is_live_mode
+    from novel.runtime import AGENT_NAMES
     from novel.setup_flow import SETUP_STAGES, approve_stage, generate_stage, stage_done
     from novel.ui.jobs import artifact_text
     cfg_map = {name: cfg.model_for(name) for name in AGENT_NAMES}
-    if not premise:
+    if not premise_text:
         saved = bible.get_concept()
-        premise = saved.logline if saved else typer.prompt("Premise")
+        premise_text = saved.logline if saved else typer.prompt("Premise")
     if not is_live_mode():
         console.print("[yellow]演示模式：反馈不会改变生成内容。[/yellow]")
     for stage in SETUP_STAGES:
@@ -81,11 +81,14 @@ def setup(premise: str = typer.Option("", "--premise", "-m",
             console.print(f"[green]✓ {stage} 已通过，跳过[/green]")
             continue
         feedback: list[str] = []
+        regenerate = True
         while True:
-            console.rule(f"[bold cyan]{stage}[/bold cyan]（第 {len(feedback) + 1} 次生成）")
-            artifact = generate_stage(stage, provider=provider, cfg_map=cfg_map,
-                                      bible=bible, premise=premise, feedback=feedback)
-            console.print(artifact_text(artifact)[:2000])
+            if regenerate:  # invalid input / empty feedback never re-runs the agent
+                console.rule(f"[bold cyan]{stage}[/bold cyan]（第 {len(feedback) + 1} 次生成）")
+                artifact = generate_stage(stage, provider=provider, cfg_map=cfg_map,
+                                          bible=bible, premise=premise_text, feedback=feedback)
+                console.print(artifact_text(artifact)[:2000])
+                regenerate = False
             choice = typer.prompt("通过(a) / 反馈(f) / 退出(q)", default="a")
             if choice in ("a", ""):
                 approve_stage(stage, artifact, bible)
@@ -98,8 +101,12 @@ def setup(premise: str = typer.Option("", "--premise", "-m",
                 fb = typer.prompt("反馈意见")
                 if fb.strip():
                     feedback.append(fb.strip())
+                    regenerate = True  # regenerate with the new feedback
+                else:
+                    console.print("[yellow]反馈为空，请重新选择[/yellow]")
                 continue
             console.print("[red]无效选择，请输入 a / f / q[/red]")
+    console.print("[green]设定完成。运行 write-chapter 开始写作（会自动跳过设定阶段）。[/green]")
 
 
 @app.command(name="write-chapter")
