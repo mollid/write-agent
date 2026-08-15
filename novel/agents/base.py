@@ -11,6 +11,15 @@ I = TypeVar("I")
 O = TypeVar("O")
 
 
+def feedback_message(agent_name: str, feedback: list[str]) -> dict:
+    return {
+        "role": "user",
+        "agent": agent_name,
+        "content": "[USER FEEDBACK — apply ALL of these to your output]\n"
+        + "\n".join(f"- {f}" for f in feedback),
+    }
+
+
 class Agent(Generic[I, O]):
     name: str = "agent"
     output_schema: type
@@ -23,8 +32,10 @@ class Agent(Generic[I, O]):
     def build_messages(self, inputs: I) -> list[dict]:
         raise NotImplementedError
 
-    def run(self, inputs: I) -> O:
+    def run(self, inputs: I, *, feedback: list[str] | None = None) -> O:
         messages = self.build_messages(inputs)
+        if feedback:
+            messages = messages + [feedback_message(self.name, feedback)]
         last_err: Exception | None = None
         for _attempt in range(self.max_retries + 1):
             try:

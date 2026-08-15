@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from novel.agents.base import Agent
+from novel.agents.base import Agent, feedback_message
 from novel.memory.assembler import AssembledContext
 
 WRITER_SYSTEM = """\
@@ -50,5 +50,8 @@ class WriterAgent(Agent[AssembledContext, str]):
              "content": WRITER_USER.format(assembled_context=inputs.text)},
         ]
 
-    def run(self, inputs: AssembledContext) -> str:
-        return self.provider.complete(self.build_messages(inputs), self.cfg)
+    def run(self, inputs: AssembledContext, *, feedback: list[str] | None = None) -> str:
+        messages = self.build_messages(inputs)
+        if feedback:
+            messages = messages + [feedback_message(self.name, feedback)]
+        return self.provider.complete(messages, self.cfg)

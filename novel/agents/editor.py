@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from novel.agents.base import Agent
+from novel.agents.base import Agent, feedback_message
 
 EDITOR_SYSTEM = """\
 You are a line editor at a top-five publishing house. You polish; you do not rewrite.
@@ -39,5 +39,8 @@ class EditorAgent(Agent[str, str]):
             {"role": "user", "agent": self.name, "content": EDITOR_USER.format(prose=inputs)},
         ]
 
-    def run(self, inputs: str) -> str:
-        return self.provider.complete(self.build_messages(inputs), self.cfg)
+    def run(self, inputs: str, *, feedback: list[str] | None = None) -> str:
+        messages = self.build_messages(inputs)
+        if feedback:
+            messages = messages + [feedback_message(self.name, feedback)]
+        return self.provider.complete(messages, self.cfg)

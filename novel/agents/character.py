@@ -4,7 +4,7 @@ import json
 
 from pydantic import ValidationError
 
-from novel.agents.base import Agent
+from novel.agents.base import Agent, feedback_message
 from novel.models import Character, Concept, World
 from novel.providers import _extract_json
 
@@ -79,9 +79,12 @@ class CharacterAgent(Agent[tuple[Concept, World], list[Character]]):
              )},
         ]
 
-    def run(self, inputs: tuple[Concept, World]) -> list[Character]:
+    def run(self, inputs: tuple[Concept, World],
+            *, feedback: list[str] | None = None) -> list[Character]:
         # list-typed structured output isn't a single BaseModel; call provider then parse array
         msgs = self.build_messages(inputs)
+        if feedback:
+            msgs = msgs + [feedback_message(self.name, feedback)]
         last_err: Exception | None = None
         for _attempt in range(self.max_retries + 1):
             try:
