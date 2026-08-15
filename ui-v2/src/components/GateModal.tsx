@@ -46,8 +46,10 @@ export default function GateModal({ project }: { project: string }) {
       return;
     }
     try {
-      if (!approve && fb.trim()) pushFeedback(fb.trim());
       await resolve.mutateAsync({ id: gate!.id, approve, feedback: fb });
+      // N1: only record history after a successful POST — a failed resolve
+      // must not leave phantom/duplicated feedback entries behind.
+      if (!approve && fb.trim()) pushFeedback(fb.trim());
     } catch (e) {
       message.error(String(e));
     }
@@ -80,7 +82,9 @@ export default function GateModal({ project }: { project: string }) {
           {feedbackHistory.length > 0 && (
             <List
               size="small"
-              header={<Typography.Text type="secondary">已提交的反馈</Typography.Text>}
+              header={
+                <Typography.Text type="secondary">本阶段已提交的反馈</Typography.Text>
+              }
               dataSource={feedbackHistory}
               renderItem={(item) => <List.Item style={{ padding: "4px 0" }}>{item}</List.Item>}
             />

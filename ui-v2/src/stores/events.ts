@@ -13,6 +13,10 @@ interface EventState {
   progress: { done: number; total: number } | null;
   lastStage: string | null;
   feedbackHistory: string[];
+  /** Latest setup-stage artifact (N3): set on `setup_stage` events that carry
+   * an `artifact`; per-STAGE, replaced as each stage generates. Cleared on job
+   * death too (resetTransient) so a stale artifact never outlives its job. */
+  setupArtifact: { stage: string; attempt: number; artifact: string } | null;
   pushLine: (text: string) => void;
   setConnected: (v: boolean) => void;
   pushFeedback: (text: string) => void;
@@ -32,6 +36,7 @@ export const useEvents = create<EventState>((set) => ({
   progress: null,
   lastStage: null,
   feedbackHistory: [],
+  setupArtifact: null,
   pushLine: (text) =>
     set((s) => ({ lines: [...s.lines, { time: fmt(), text }].slice(-MAX_LINES) })),
   setConnected: (v) => set({ connected: v }),
@@ -57,6 +62,13 @@ export const useEvents = create<EventState>((set) => ({
           break;
         case "setup_stage":
           if (ev.attempt === 1) patch.feedbackHistory = [];
+          if (typeof ev.artifact === "string" && ev.artifact) {
+            patch.setupArtifact = {
+              stage: String(ev.stage),
+              attempt: Number(ev.attempt ?? 1),
+              artifact: ev.artifact,
+            };
+          }
           break;
         case "job_end":
           patch.job = null;
@@ -71,7 +83,8 @@ export const useEvents = create<EventState>((set) => ({
       }
       return patch;
     }),
-  resetTransient: () => set({ gate: null, job: null, progress: null }),
+  resetTransient: () =>
+    set({ gate: null, job: null, progress: null, setupArtifact: null }),
   reset: () =>
     set({
       connected: false,
@@ -81,5 +94,6 @@ export const useEvents = create<EventState>((set) => ({
       progress: null,
       lastStage: null,
       feedbackHistory: [],
+      setupArtifact: null,
     }),
 }));

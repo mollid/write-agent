@@ -26,6 +26,14 @@ function stubFetch() {
   return fetchMock;
 }
 
+function stubFailingFetch() {
+  const fetchMock = vi.fn(
+    async () => new Response(JSON.stringify({ detail: "boom" }), { status: 500 }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   act(() => {
@@ -76,7 +84,22 @@ test("setup rejection with feedback POSTs and records history", async () => {
   const [url, opts] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
   expect(url).toBe("/api/gates/g1");
   expect(JSON.parse(String(opts.body))).toEqual({ approve: false, feedback: "基调更黑暗" });
-  expect(useEvents.getState().feedbackHistory).toEqual(["基调更黑暗"]);
+  // N1: history is recorded only after the POST succeeds
+  await waitFor(() => expect(useEvents.getState().feedbackHistory).toEqual(["基调更黑暗"]));
+});
+
+test("failed feedback POST shows an error and records no phantom history (N1)", async () => {
+  stubFailingFetch();
+  renderModal();
+  act(() => {
+    useEvents.getState().apply({
+      type: "gate", gate_id: "g1", label: "setup:world", artifact: "{}", job_id: "j1",
+    });
+  });
+  fireEvent.change(screen.getByTestId("gate-feedback"), { target: { value: "基调更黑暗" } });
+  fireEvent.click(screen.getByTestId("gate-reject"));
+  await waitFor(() => expect(screen.getByText(/boom/)).toBeInTheDocument());
+  expect(useEvents.getState().feedbackHistory).toEqual([]);
 });
 
 test("force-pass gate requires a second confirming click", async () => {

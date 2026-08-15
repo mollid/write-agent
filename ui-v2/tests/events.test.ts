@@ -54,4 +54,32 @@ describe("event store", () => {
     useEvents.getState().apply({ type: "setup_stage", stage: "characters", attempt: 1, job_id: "j1" });
     expect(useEvents.getState().feedbackHistory).toEqual([]);
   });
+
+  test("setup_stage with artifact stores setupArtifact (N3); artifact-less events keep it", () => {
+    useEvents.getState().apply({
+      type: "setup_stage", stage: "concept", attempt: 1,
+      artifact: '{"logline": "…"}', job_id: "j1",
+    });
+    expect(useEvents.getState().setupArtifact).toEqual({
+      stage: "concept", attempt: 1, artifact: '{"logline": "…"}',
+    });
+    // skipped / aborted summary events carry no artifact — don't clobber it
+    useEvents.getState().apply({
+      type: "setup_stage", stage: "world", attempt: 0, skipped: true, job_id: "j1",
+    });
+    expect(useEvents.getState().setupArtifact?.stage).toBe("concept");
+  });
+
+  test("setupArtifact cleared by resetTransient (job death) and reset (N3)", () => {
+    useEvents.getState().apply({
+      type: "setup_stage", stage: "world", attempt: 2, artifact: "{}", job_id: "j1",
+    });
+    useEvents.getState().resetTransient();
+    expect(useEvents.getState().setupArtifact).toBeNull();
+    useEvents.getState().apply({
+      type: "setup_stage", stage: "world", attempt: 2, artifact: "{}", job_id: "j1",
+    });
+    useEvents.getState().reset();
+    expect(useEvents.getState().setupArtifact).toBeNull();
+  });
 });
