@@ -229,7 +229,7 @@ def run_setup_job(proj_root: Path, premise: str) -> Callable[[Job], object]:
                     break
                 if not fb:
                     job.emit({"type": "setup_stage", "stage": stage, "attempt": 0,
-                              "skipped": True})
+                              "skipped": True, "reason": "aborted"})
                     return None  # rejected without feedback: stop cleanly, keep approved stages
                 feedback.append(fb)
         return None

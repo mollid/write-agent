@@ -222,7 +222,9 @@ function handleEvent(m) {
       log(`✔ 故事概念已生成（genre=${m.genre}）`);
       break;
     case "setup_stage":
-      if (m.skipped) log(`设定阶段 ${m.stage} 已通过，跳过`);
+      if (m.skipped && m.reason === "aborted")
+        log(`设定阶段 ${m.stage} 未通过，设定已停止（已通过的阶段已保留）`);
+      else if (m.skipped) log(`设定阶段 ${m.stage} 已通过，跳过`);
       else log(`设定阶段 ${m.stage}：第 ${m.attempt} 次生成（见审批卡片）`);
       break;
     case "gate":
