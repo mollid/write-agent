@@ -34,6 +34,7 @@ class Gate:
     artifact: str
     done: threading.Event = field(default_factory=threading.Event)
     approved: bool = False
+    feedback: str | None = None
 
 
 class Job:
@@ -61,6 +62,11 @@ class Job:
 
     def gate(self, label: str, artifact: object) -> bool:
         """Block until the GUI resolves this approval request (or the job is cancelled)."""
+        return self.gate_with_feedback(label, artifact)[0]
+
+    def gate_with_feedback(self, label: str, artifact: object) -> tuple[bool, str | None]:
+        """Block until resolved; returns (approved, feedback_text). feedback is set only
+        when the resolver supplied one (guided-setup regeneration requests)."""
         g = Gate(id=uuid.uuid4().hex[:12], label=label, artifact=artifact_text(artifact))
         self.gates[g.id] = g
         if self._bus is not None:
@@ -70,8 +76,8 @@ class Job:
             })
         while not g.done.wait(timeout=0.25):
             if self.cancel.is_set():
-                return False
-        return g.approved
+                return False, None
+        return g.approved, g.feedback
 
     # -- lifecycle ----------------------------------------------------
     def start(self, bus: EventBus) -> None:
@@ -160,13 +166,15 @@ class JobManager:
             g.done.set()
         return True
 
-    def resolve_gate(self, gate_id: str, approved: bool) -> bool:
+    def resolve_gate(self, gate_id: str, approved: bool,
+                     feedback: str | None = None) -> bool:
         for job in self._jobs.values():
             g = job.gates.get(gate_id)
             if g is not None:
                 if g.done.is_set():
                     return False  # already resolved or cancelled
                 g.approved = approved
+                g.feedback = feedback
                 g.done.set()
                 return True
         return False
@@ -188,6 +196,43 @@ def run_premise_job(proj_root: Path, text: str) -> Callable[[Job], object]:
         StoryBible(proj).set_concept(concept)
         job.emit({"type": "premise_done", "genre": concept.genre})
         return concept
+    return fn
+
+
+def run_setup_job(proj_root: Path, premise: str) -> Callable[[Job], object]:
+    """Guided setup: per stage, block on a gate that carries approve-or-feedback."""
+    def fn(job: Job) -> object:
+        from novel.config import load_config
+        from novel.project import NovelProject
+        from novel.runtime import AGENT_NAMES, make_provider
+        from novel.setup_flow import SETUP_STAGES, approve_stage, generate_stage, stage_done
+        from novel.store.bible import StoryBible
+
+        proj = NovelProject(root=proj_root)
+        cfg = load_config(proj.config_path)
+        provider = make_provider(cfg)
+        bible = StoryBible(proj)
+        cfg_map = {name: cfg.model_for(name) for name in AGENT_NAMES}
+        for stage in SETUP_STAGES:
+            if stage_done(stage, bible):
+                job.emit({"type": "setup_stage", "stage": stage, "attempt": 0, "skipped": True})
+                continue
+            feedback: list[str] = []
+            while True:
+                artifact = generate_stage(stage, provider=provider, cfg_map=cfg_map,
+                                          bible=bible, premise=premise, feedback=feedback)
+                job.emit({"type": "setup_stage", "stage": stage, "attempt": len(feedback) + 1,
+                          "artifact": artifact_text(artifact)})
+                approved, fb = job.gate_with_feedback(f"setup:{stage}", artifact)
+                if approved:
+                    approve_stage(stage, artifact, bible)
+                    break
+                if not fb:
+                    job.emit({"type": "setup_stage", "stage": stage, "attempt": 0,
+                              "skipped": True})
+                    return None  # rejected without feedback: stop cleanly, keep approved stages
+                feedback.append(fb)
+        return None
     return fn
 
 

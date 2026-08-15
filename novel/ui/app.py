@@ -31,6 +31,11 @@ class WriteReq(BaseModel):
 
 class GateReq(BaseModel):
     approve: bool
+    feedback: str = ""
+
+
+class SetupReq(BaseModel):
+    premise: str = ""
 
 
 def _safe_project(root: Path, name: str) -> Path:
@@ -115,6 +120,15 @@ def create_app(root: Path) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(e)) from e
         return {"job_id": job.id}
 
+    @app.post("/api/projects/{name}/setup", status_code=202)
+    def start_setup(name: str, req: SetupReq) -> dict[str, str]:
+        p = _safe_project(root, name)
+        try:
+            job = manager.start(name, "setup", jobs.run_setup_job(p, req.premise))
+        except RuntimeError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+        return {"job_id": job.id}
+
     @app.get("/api/projects/{name}/chapters/{num}")
     def get_chapter(name: str, num: int) -> dict[str, object]:
         p = _safe_project(root, name)
@@ -176,7 +190,7 @@ def create_app(root: Path) -> FastAPI:
 
     @app.post("/api/gates/{gate_id}")
     def resolve_gate(gate_id: str, req: GateReq) -> dict[str, bool]:
-        ok = manager.resolve_gate(gate_id, req.approve)
+        ok = manager.resolve_gate(gate_id, req.approve, req.feedback or None)
         if not ok:
             raise HTTPException(status_code=404, detail="审批请求不存在或已处理")
         return {"resolved": True}
@@ -194,7 +208,9 @@ def create_app(root: Path) -> FastAPI:
         if job is None:
             raise HTTPException(status_code=404, detail="任务不存在")
         return {"id": job.id, "kind": job.kind, "status": job.status,
-                "error": job.error, "project": job.project}
+                "error": job.error, "project": job.project,
+                "gates": [{"id": g.id, "label": g.label}
+                          for g in job.gates.values() if not g.done.is_set()]}
 
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
     return app
