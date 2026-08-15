@@ -30,15 +30,42 @@ function stubFetchFor(over: {
   postStatus?: number;
   postDetail?: string;
   outline?: object | null;
+  projects?: { name: string }[];
+  reviews?: object[];
+  threads?: object[];
+  chapterContent?: (n: number) => string;
+  exportPath?: string;
 } = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === "/api/mode")
       return new Response(JSON.stringify({ live: over.live ?? false }), { status: 200 });
+    if (url === "/api/projects" && init?.method !== "POST")
+      return new Response(JSON.stringify(over.projects ?? []), { status: 200 });
     if (url === "/api/projects/x/status")
       return new Response(JSON.stringify({ ...baseStatus, ...over.status }), { status: 200 });
     if (url === "/api/projects/x/outline")
       return new Response(JSON.stringify(over.outline ?? { arcs: [] }), { status: 200 });
+    if (url === "/api/projects/x/reviews")
+      return new Response(JSON.stringify(over.reviews ?? []), { status: 200 });
+    if (url === "/api/projects/x/threads")
+      return new Response(JSON.stringify(over.threads ?? []), { status: 200 });
+    const chMatch = url.match(/^\/api\/projects\/x\/chapters\/(\d+)$/);
+    if (chMatch) {
+      const n = Number(chMatch[1]);
+      return new Response(
+        JSON.stringify({
+          chapter: n,
+          content: over.chapterContent ? over.chapterContent(n) : `第 ${n} 章的演示正文。`,
+        }),
+        { status: 200 },
+      );
+    }
+    if (init?.method === "POST" && url.endsWith("/export"))
+      return new Response(
+        JSON.stringify({ path: over.exportPath ?? "/tmp/novels/x/export/x.md" }),
+        { status: 200 },
+      );
     if (init?.method === "POST") {
       if (over.postStatus && over.postStatus >= 400)
         return new Response(
@@ -53,12 +80,12 @@ function stubFetchFor(over: {
   return fetchMock;
 }
 
-function renderPage(el: ReactElement, routePath = "/p/:name/setup") {
+function renderPage(el: ReactElement, routePath = "/p/:name/setup", initialEntry?: string) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
       <AntApp>
-        <MemoryRouter initialEntries={[routePath.replace(":name", "x")]}>
+        <MemoryRouter initialEntries={[initialEntry ?? routePath.replace(":name", "x")]}>
           <Routes>
             <Route path={routePath} element={el} />
           </Routes>
@@ -329,4 +356,183 @@ test("Generate: log lines render; job_end toasts and invalidates", async () => {
   });
   await waitFor(() => expect(screen.getByText("任务完成")).toBeInTheDocument());
   expect(useEvents.getState().progress).toBeNull();
+});
+
+// ---------- Reader page (T8 + F1) ----------
+
+import Reader from "../src/pages/Reader";
+import { useSearchParams } from "react-router-dom";
+
+function SearchProbe() {
+  const [sp] = useSearchParams();
+  return <div data-testid="search-probe">{sp.toString()}</div>;
+}
+
+test("Reader: titled chapter list from outline; untitled fallback", async () => {
+  stubFetchFor({
+    status: { has_outline: true, chapters: [1, 2] },
+    outline: { arcs: [{ arc_name: "A", chapters: [{ chapter_no: 2, chapter_title: "钟之城" }] }] },
+  });
+  renderPage(<Reader />, "/p/:name/reader");
+
+  expect(await screen.findByText("001 · （无标题）")).toBeInTheDocument();
+  expect(screen.getByText("002 · 钟之城")).toBeInTheDocument();
+  // first chapter auto-selected → prose fetched
+  expect(await screen.findByTestId("reader-prose")).toHaveTextContent("第 1 章的演示正文。");
+});
+
+test("Reader: ?chapter=2 deep link preselects chapter 2 and clears the param (F1)", async () => {
+  const fetchMock = stubFetchFor({
+    status: { has_outline: true, chapters: [1, 2, 3] },
+    outline: OUTLINE_RESP,
+  });
+  renderPage(
+    <>
+      <Reader />
+      <SearchProbe />
+    </>,
+    "/p/:name/reader",
+    "/p/x/reader?chapter=2",
+  );
+
+  expect(await screen.findByTestId("reader-prose")).toHaveTextContent("第 2 章的演示正文。");
+  expect(fetchMock.mock.calls.some((c) => String(c[0]) === "/api/projects/x/chapters/2")).toBe(true);
+  // menu item 2 selected; param cleared so back-button stays sane
+  await waitFor(() => {
+    const item = screen.getByText("002 · T2").closest(".ant-menu-item");
+    expect(item?.className).toContain("ant-menu-item-selected");
+  });
+  await waitFor(() => expect(screen.getByTestId("search-probe")).toHaveTextContent(""));
+});
+
+test("Reader: empty state links to the generate page", async () => {
+  stubFetchFor();
+  renderPage(<Reader />, "/p/:name/reader");
+
+  expect(await screen.findByText("尚无章节")).toBeInTheDocument();
+  expect(screen.getByText("去生成")).toHaveAttribute("href", "/p/x/generate");
+});
+
+// ---------- Reviews page + Trend (T8) ----------
+
+import Reviews from "../src/pages/Reviews";
+import { Trend, trendPoints } from "../src/components/Trend";
+import type { ReviewRecord } from "../src/api/types";
+
+const REVIEWS: ReviewRecord[] = [
+  {
+    chapter: 1,
+    attempt: 1,
+    artifact_type: "chapter",
+    overall: 60,
+    summary: "首次未达标",
+    passed: false,
+    timestamp: "2026-08-15T10:00:00",
+    scores: { pacing: { score: 55, critique: "节奏偏快" }, prose: { score: 65, critique: "" } },
+  },
+  {
+    chapter: 1,
+    attempt: 2,
+    artifact_type: "chapter",
+    overall: 85,
+    summary: "重写后达标",
+    passed: true,
+    timestamp: "2026-08-15T10:05:00",
+    scores: { pacing: { score: 84, critique: "" }, prose: { score: 86, critique: "" } },
+  },
+  {
+    chapter: 2,
+    attempt: 1,
+    artifact_type: "chapter",
+    overall: 90,
+    summary: "一次通过",
+    passed: true,
+    timestamp: "2026-08-15T11:00:00",
+    scores: { pacing: { score: 91, critique: "" } },
+  },
+];
+
+test("Reviews: groups by chapter, final badge + attempts with text scores (not color-only)", async () => {
+  stubFetchFor({ reviews: REVIEWS });
+  renderPage(<Reviews />, "/p/:name/reviews");
+
+  // chapter headers with summary badges
+  expect(await screen.findByText("第 1 章")).toBeInTheDocument();
+  expect(screen.getByText("最终 85 分 ✅")).toBeInTheDocument();
+  expect(screen.getByText("2 次评分")).toBeInTheDocument();
+  expect(screen.getByText("最终 90 分 ✅")).toBeInTheDocument();
+  // attempts in order, pass/fail as words + icon
+  const a1 = await screen.findByTestId("review-attempt-1-1");
+  expect(a1).toHaveTextContent("未通过 ❌");
+  expect(a1).toHaveTextContent("总分 60 分");
+  expect(await screen.findByTestId("review-attempt-1-2")).toHaveTextContent("通过 ✅");
+  // dimension scores as text
+  expect(screen.getByText("pacing：55 分")).toBeInTheDocument();
+  expect(screen.getByText("prose：86 分")).toBeInTheDocument();
+});
+
+test("Reviews: trend svg renders for ≥2 chapters with role=img + aria-label", async () => {
+  stubFetchFor({ reviews: REVIEWS });
+  renderPage(<Reviews />, "/p/:name/reviews");
+
+  const svg = await screen.findByTestId("score-trend");
+  expect(svg).toHaveAttribute("role", "img");
+  expect(svg).toHaveAttribute("aria-label", "各章总分趋势");
+  expect(svg.querySelector("polyline")).toBeInTheDocument();
+});
+
+test("Reviews: empty state when no records; Trend needs ≥2 points; last attempt wins", async () => {
+  stubFetchFor({ reviews: [] });
+  renderPage(<Reviews />, "/p/:name/reviews");
+  expect(await screen.findByText("暂无评分记录，生成章节后自动留档")).toBeInTheDocument();
+
+  // unit-level: trendPoints picks the LAST attempt per chapter, ascending order
+  expect(trendPoints(REVIEWS)).toEqual([
+    { x: 1, y: 85 },
+    { x: 2, y: 90 },
+  ]);
+  // <2 points → renders nothing
+  const { container } = render(<Trend points={[{ x: 1, y: 80 }]} />);
+  expect(container.querySelector("svg")).toBeNull();
+});
+
+// ---------- Threads page (T8) ----------
+
+import Threads from "../src/pages/Threads";
+
+test("Threads: table with status tags (color + text) and teaching empty state", async () => {
+  stubFetchFor({
+    threads: [
+      { id: "fs-1", description: "钟楼的第七口钟", status: "planted" },
+      { id: "fs-2", description: "偷走的时间去了哪里", status: "open" },
+      { id: "fs-3", description: "告密者的身份", status: "paid_off" },
+    ],
+  });
+  renderPage(<Threads />, "/p/:name/threads");
+
+  expect(await screen.findByText("钟楼的第七口钟")).toBeInTheDocument();
+  expect(screen.getByText("已埋设（planted）")).toBeInTheDocument();
+  expect(screen.getByText("待埋设（open）")).toBeInTheDocument();
+  expect(screen.getByText("已回收（paid_off）")).toBeInTheDocument();
+
+  stubFetchFor({ threads: [] });
+  renderPage(<Threads />, "/p/:name/threads");
+  expect(await screen.findByText(/暂无伏笔记录/)).toBeInTheDocument();
+});
+
+// ---------- Export page (T8) ----------
+
+import Export from "../src/pages/Export";
+
+test("Export: button POSTs, path shown copyable with note", async () => {
+  const fetchMock = stubFetchFor({ exportPath: "/tmp/novels/x/export/x.md" });
+  renderPage(<Export />, "/p/:name/export");
+
+  expect(screen.getByText("导出文件位于项目目录")).toBeInTheDocument();
+  fireEvent.click(screen.getByTestId("export-button"));
+  expect(await screen.findByTestId("export-path")).toHaveTextContent("/tmp/novels/x/export/x.md");
+  expect(screen.getByText("导出完成")).toBeInTheDocument();
+  const call = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/export"));
+  expect(call).toBeTruthy();
+  expect((call![1] as RequestInit).method).toBe("POST");
 });
