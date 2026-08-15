@@ -151,6 +151,21 @@ def create_app(root: Path) -> FastAPI:
         return [{"id": f.id, "description": f.description, "status": f.status.value}
                 for f in bible.list_foreshadow()]
 
+    @app.get("/api/projects/{name}/outline")
+    def get_outline(name: str) -> dict[str, object]:
+        p = _safe_project(root, name)
+        from novel.models import Outline
+        from novel.project import NovelProject
+        from novel.store.bible import StoryBible
+        outline: Outline | None = StoryBible(NovelProject(root=p)).get_outline()
+        if outline is None:
+            return {"arcs": []}
+        return {"arcs": [
+            {"arc_name": a.arc_name,
+             "chapters": [{"chapter_no": c.chapter_no, "chapter_title": c.chapter_title}
+                          for c in a.chapters]}
+            for a in outline.arcs]}
+
     @app.get("/api/projects/{name}/reviews")
     def get_reviews(name: str) -> list[dict[str, object]]:
         p = _safe_project(root, name)

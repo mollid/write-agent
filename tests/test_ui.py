@@ -289,3 +289,16 @@ def _poll_gate_via_http(client: TestClient, job_id: str, timeout: float = 10.0) 
             return str(g["id"])
         time.sleep(0.05)
     raise AssertionError("job exposed no pending gate")
+
+
+def test_outline_endpoint(client: TestClient) -> None:
+    client.post("/api/projects", json={"name": "po"})
+    job_id = client.post("/api/projects/po/premise", json={"text": "x"}).json()["job_id"]
+    assert _wait_job(client, job_id)["status"] == "done"
+    r = client.post("/api/projects/po/write-chapter", json={"n": 1})
+    assert _wait_job(client, r.json()["job_id"])["status"] == "done"
+    outline = client.get("/api/projects/po/outline").json()
+    titles = [c["chapter_title"] for arc in outline["arcs"] for c in arc["chapters"]]
+    assert titles == ["T1", "T2", "T3"][: len(titles)] and len(titles) == 3
+    assert set(outline["arcs"][0]["chapters"][0]) == {"chapter_no", "chapter_title"}
+    assert client.get("/api/projects/nope/outline").status_code == 404
