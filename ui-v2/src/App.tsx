@@ -14,6 +14,7 @@ import zhCN from "antd/locale/zh_CN";
 import { useMode, useProjects } from "./api/hooks";
 import { useProjectEvents } from "./api/events";
 import JobStrip from "./components/JobStrip";
+import GateModal from "./components/GateModal";
 import Projects from "./pages/Projects";
 import Overview from "./pages/Overview";
 import Setup from "./pages/Setup";
@@ -86,7 +87,14 @@ function Shell() {
             {mode?.live ? "真实模型模式" : "演示模式"}
           </Tag>
         </Layout.Header>
-        <div style={{ padding: "0 16px" }}>{name ? <JobStrip project={name} /> : null}</div>
+        <div style={{ padding: "0 16px" }}>
+          {name ? (
+            <>
+              <JobStrip project={name} />
+              <GateModal project={name} />
+            </>
+          ) : null}
+        </div>
         <Layout.Content style={{ padding: 16, overflow: "auto" }}>
           <Outlet />
         </Layout.Content>
