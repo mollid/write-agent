@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from novel.agents.base import Agent
+from novel.agents.base import Agent, feedback_message
 from novel.providers import _extract_json
 
 CONTINUITY_SYSTEM = """\
@@ -58,8 +58,10 @@ class ContinuityAgent(Agent[tuple[str, str], list[str]]):
              "content": CONTINUITY_USER.format(bible_json=bible_json, prose=prose)},
         ]
 
-    def run(self, inputs: tuple[str, str]) -> list[str]:
+    def run(self, inputs: tuple[str, str], *, feedback: list[str] | None = None) -> list[str]:
         msgs = self.build_messages(inputs)
+        if feedback:
+            msgs = msgs + [feedback_message(self.name, feedback)]
         last_err: Exception | None = None
         for _attempt in range(self.max_retries + 1):
             try:

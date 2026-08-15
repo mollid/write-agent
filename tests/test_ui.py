@@ -197,3 +197,95 @@ def test_write_chapter_rewrites_empty_chapter(client: TestClient, tmp_path: Path
     assert ch2.read_text(encoding="utf-8") == good2  # complete chapter untouched
     status = client.get("/api/projects/px/status").json()
     assert status["chapters"] == [1, 2]
+
+
+def test_run_setup_job_feedback_then_approve(tmp_path: Path) -> None:
+    """Jobs layer: feedback regenerates the stage, approvals persist everything."""
+    from novel.project import NovelProject
+    from novel.store.bible import StoryBible
+
+    proj = NovelProject.scaffold("sp", genre="fantasy", root=tmp_path)
+    m = jobs.JobManager()
+    q = m.bus.subscribe("sp")
+    job = m.start("sp", "setup", jobs.run_setup_job(proj.root, "a thief"))
+    try:
+        import time
+        deadline = time.time() + 30.0
+        sent_feedback = False
+        while job.thread.is_alive() and time.time() < deadline:
+            gate_id = _next_gate(q, job.id)
+            if gate_id is None:
+                break  # job_end: all stages resolved
+            if not sent_feedback:
+                m.resolve_gate(gate_id, False, "主角改成女性")  # regenerate once
+                sent_feedback = True
+            else:
+                m.resolve_gate(gate_id, True)  # approve everything else
+        assert job.status == "done", job.error
+        bible = StoryBible(proj)
+        assert bible.get_concept() is not None and bible.get_outline() is not None
+        assert bible.get_world() is not None and bible.all_characters()
+    finally:
+        job.thread.join(timeout=5)
+    assert job.status == "done"
+
+
+def _next_gate(q, job_id: str, timeout: float = 10.0) -> str | None:
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for ev in jobs.drain(q, timeout=0.05):
+            if ev.get("job_id") != job_id:
+                continue
+            if ev.get("type") == "gate":
+                return str(ev["gate_id"])
+            if ev.get("type") == "job_end":
+                return None
+        time.sleep(0.02)
+    raise AssertionError("no gate event in time")
+
+
+def test_setup_endpoint_requires_premise_or_concept(client: TestClient) -> None:
+    """Empty premise on a fresh project (no concept) -> 422."""
+    client.post("/api/projects", json={"name": "sf"})
+    r = client.post("/api/projects/sf/setup", json={"premise": ""})
+    assert r.status_code == 422
+    assert "缺少创意" in r.json()["detail"]
+
+
+def test_setup_endpoint_full_flow(client: TestClient) -> None:
+    client.post("/api/projects", json={"name": "sx"})
+    r = client.post("/api/projects/sx/setup", json={"premise": "a thief"})
+    assert r.status_code == 202
+    job_id = r.json()["job_id"]
+    gate_id = _poll_gate_via_http(client, job_id)
+    # feedback -> regenerate (gate for attempt 2 of the same stage)
+    assert client.post("/api/gates/" + gate_id,
+                       json={"approve": False, "feedback": "基调更黑暗"}).status_code == 200
+    gate_id2 = _poll_gate_via_http(client, job_id)
+    assert gate_id2 != gate_id
+    assert client.post("/api/gates/" + gate_id2, json={"approve": True}).status_code == 200
+    # approve the remaining stages (world / characters / outline) until the job ends
+    import time
+    deadline = time.time() + 30.0
+    data = client.get(f"/api/jobs/{job_id}").json()
+    while data["status"] == "running" and time.time() < deadline:
+        gates = data.get("gates", [])
+        if gates:
+            client.post(f"/api/gates/{gates[0]['id']}", json={"approve": True})
+        time.sleep(0.05)
+        data = client.get(f"/api/jobs/{job_id}").json()
+    assert data["status"] == "done", data.get("error")
+    status = client.get("/api/projects/sx/status").json()
+    assert status["has_concept"] is True and status["has_outline"] is True
+
+
+def _poll_gate_via_http(client: TestClient, job_id: str, timeout: float = 10.0) -> str:
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        data = client.get(f"/api/jobs/{job_id}").json()
+        for g in data.get("gates", []):
+            return str(g["id"])
+        time.sleep(0.05)
+    raise AssertionError("job exposed no pending gate")

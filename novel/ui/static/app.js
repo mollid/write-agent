@@ -16,6 +16,10 @@ const STAGE_NAMES = {
   worldbuilder: "世界观构建中",
   character: "角色设计中",
   outliner: "大纲编排中",
+  concept: "生成故事概念",
+  world: "构建世界观",
+  characters: "设计人物",
+  outline: "编排大纲",
   resume: "从故事圣经恢复",
   writer: "正文写作中",
   writer_rewrite: "按评审意见重写中",
@@ -217,6 +221,12 @@ function handleEvent(m) {
     case "premise_done":
       log(`✔ 故事概念已生成（genre=${m.genre}）`);
       break;
+    case "setup_stage":
+      if (m.skipped && m.reason === "aborted")
+        log(`设定阶段 ${m.stage} 未通过，设定已停止（已通过的阶段已保留）`);
+      else if (m.skipped) log(`设定阶段 ${m.stage} 已通过，跳过`);
+      else log(`设定阶段 ${m.stage}：第 ${m.attempt} 次生成（见审批卡片）`);
+      break;
     case "gate":
       showGate(m);
       break;
@@ -248,10 +258,19 @@ function onJobEnd(m) {
 
 function showGate(m) {
   $("gate-card").hidden = false;
-  $("gate-label").textContent = GATE_LABELS[m.label] || m.label;
+  if (String(m.label).startsWith("setup:")) {
+    const st = m.label.slice(6);
+    $("gate-label").textContent = `设定阶段：${SETUP_STAGE_NAMES[st] || st} — 通过还是修改？`;
+  } else {
+    $("gate-label").textContent = GATE_LABELS[m.label] || m.label;
+  }
   $("gate-artifact").textContent = (m.artifact || "").slice(0, 4000);
+  const isSetup = String(m.label).startsWith("setup:");
+  $("gate-feedback").hidden = !isSetup;
+  $("gate-feedback").value = "";
   $("btn-approve").disabled = false;
   $("btn-reject").disabled = false;
+  $("btn-reject").textContent = isSetup ? "带反馈重生成" : "拒绝";
   $("gate-card").dataset.gateId = m.gate_id;
   log(`⚠ 等待审批：${m.label}`);
   setStatus("等待审批…");
@@ -263,6 +282,13 @@ const GATE_LABELS = {
   chapter_review_failed: "本章多次重写后仍未达标，是否强行放行？",
 };
 
+const SETUP_STAGE_NAMES = {
+  concept: "故事概念",
+  world: "世界观",
+  characters: "人物",
+  outline: "大纲",
+};
+
 function closeGate() {
   $("gate-card").hidden = true;
 }
@@ -270,14 +296,19 @@ function closeGate() {
 async function resolveGate(approve) {
   const id = $("gate-card").dataset.gateId;
   if (!id) return;
+  let feedback = "";
+  if (!approve && !$("gate-feedback").hidden) {
+    feedback = $("gate-feedback").value.trim();
+    if (!feedback) { alert("请填写修改意见，或点击「通过」"); return; }
+  }
   $("btn-approve").disabled = true;
   $("btn-reject").disabled = true;
   await api(`/api/gates/${id}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ approve }),
+    body: JSON.stringify({ approve, feedback }),
   });
-  log(approve ? "已批准" : "已拒绝");
+  log(approve ? "已批准" : "已提交反馈，重新生成中…");
   closeGate();
 }
 
@@ -296,6 +327,23 @@ async function startPremise() {
     $("btn-cancel").hidden = false;
     setStatus("策略智能体生成概念中…");
     log(`▶ 生成概念：${text}`);
+  } catch (e) { alert(e.message); }
+}
+
+async function startSetup() {
+  const premiseText = $("premise-input").value.trim();
+  try {
+    const mode = await api("/api/mode");
+    if (!mode.live) log("⚠ 演示模式：反馈不会改变生成内容");
+    const r = await api(`/api/projects/${state.project}/setup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ premise: premiseText }),
+    });
+    state.jobId = r.job_id;
+    $("btn-cancel").hidden = false;
+    log(`▶ 开始分阶段设定${premiseText ? `：${premiseText}` : ""}`);
+    setStatus("设定流程启动…");
   } catch (e) { alert(e.message); }
 }
 
@@ -368,6 +416,7 @@ $("new-project-form").onsubmit = async (ev) => {
   } catch (e) { alert(e.message); }
 };
 $("btn-premise").onclick = startPremise;
+$("btn-setup").onclick = startSetup;
 $("btn-write").onclick = startWrite;
 $("btn-cancel").onclick = cancelJob;
 $("btn-approve").onclick = () => resolveGate(true);
