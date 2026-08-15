@@ -536,3 +536,131 @@ test("Export: button POSTs, path shown copyable with note", async () => {
   expect(call).toBeTruthy();
   expect((call![1] as RequestInit).method).toBe("POST");
 });
+
+// ---------- Projects page (T9) ----------
+
+import Projects from "../src/pages/Projects";
+
+test("Projects: cards with enter button; empty name blocked by validation", async () => {
+  const fetchMock = stubFetchFor({ projects: [{ name: "alpha" }] });
+  renderPage(<Projects />, "/");
+
+  expect(await screen.findByText("alpha")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("新建项目"));
+  fireEvent.click(await screen.findByTestId("create-submit"));
+  await waitFor(() => expect(screen.getByText("请输入项目名")).toBeInTheDocument());
+  expect(
+    fetchMock.mock.calls.find(
+      (c) => String(c[0]) === "/api/projects" && (c[1] as RequestInit).method === "POST",
+    ),
+  ).toBeUndefined();
+});
+
+test("Projects: create submits {name, genre} payload; 409 conflict surfaced", async () => {
+  const fetchMock = stubFetchFor({ projects: [] });
+  renderPage(<Projects />, "/");
+
+  fireEvent.click(screen.getByText("新建项目"));
+  fireEvent.change(await screen.findByTestId("project-name-input"), {
+    target: { value: "beta" },
+  });
+  fireEvent.click(screen.getByTestId("create-submit"));
+  await waitFor(() => {
+    const call = fetchMock.mock.calls.find(
+      (c) => String(c[0]) === "/api/projects" && (c[1] as RequestInit).method === "POST",
+    );
+    expect(call).toBeTruthy();
+    expect(JSON.parse(String((call![1] as RequestInit).body))).toEqual({
+      name: "beta",
+      genre: "fantasy",
+    });
+  });
+  await waitFor(() => expect(screen.getByText("项目 beta 已创建")).toBeInTheDocument());
+});
+
+test("Projects: 409 conflict surfaces as an error message", async () => {
+  stubFetchFor({ postStatus: 409, postDetail: "项目已存在" });
+  renderPage(<Projects />, "/");
+
+  fireEvent.click(screen.getByText("新建项目"));
+  fireEvent.change(await screen.findByTestId("project-name-input"), {
+    target: { value: "beta" },
+  });
+  fireEvent.click(screen.getByTestId("create-submit"));
+  await waitFor(() =>
+    expect(screen.getByText(/创建失败（冲突）：项目已存在/)).toBeInTheDocument(),
+  );
+});
+
+// ---------- Overview page (T9) ----------
+
+import Overview from "../src/pages/Overview";
+
+test("Overview: !has_concept → hero CTA to setup; empty-chapters state links", async () => {
+  stubFetchFor({ status: { has_concept: false, chapters: [], open_threads: 0 } });
+  renderPage(<Overview />, "/p/:name/overview");
+
+  const cta = await screen.findByTestId("overview-cta");
+  expect(cta).toBeInTheDocument();
+  expect(screen.getByTestId("overview-cta-button")).toHaveTextContent("从一句创意开始 →");
+  expect(screen.getByTestId("overview-cta-button").closest("a")).toHaveAttribute(
+    "href",
+    "/p/x/setup",
+  );
+  expect(await screen.findByText(/还没有章节/)).toBeInTheDocument();
+  expect(screen.getByText("概念未生成")).toBeInTheDocument();
+});
+
+test("Overview: stats state when concept exists — tags, latest chapter link, threads, job", async () => {
+  stubFetchFor({
+    status: {
+      has_concept: true,
+      has_world: true,
+      has_outline: true,
+      chapters: [1, 3],
+      open_threads: 2,
+      job: { id: "j5", kind: "write-chapter", status: "running", error: null },
+    },
+  });
+  renderPage(<Overview />, "/p/:name/overview");
+
+  expect(await screen.findByTestId("overview-stats")).toBeInTheDocument();
+  expect(screen.queryByTestId("overview-cta")).not.toBeInTheDocument();
+  expect(screen.getByText("✓ 概念已生成")).toBeInTheDocument();
+  expect(screen.getByText("✓ 世界观已构建")).toBeInTheDocument();
+  expect(screen.getByText("✓ 大纲已编排")).toBeInTheDocument();
+  expect(screen.getByText("共 2 章")).toBeInTheDocument();
+  expect(screen.getByText("最新章节：第 3 章")).toHaveAttribute("href", "/p/x/reader?chapter=3");
+  expect(screen.getByText("2 条未闭合")).toBeInTheDocument();
+  expect(screen.getByText("章节生成")).toBeInTheDocument(); // job kind 中文文案
+});
+
+// ---------- F2: Generate 409 CTA pulses the JobStrip; F3 demo notice ----------
+
+import JobStrip from "../src/components/JobStrip";
+
+test("Generate: 409 CTA pulses JobStrip instead of no-op navigate (F2); demo notice (F3)", async () => {
+  stubFetchFor({ postStatus: 409, postDetail: "任务已在运行" });
+  act(() => {
+    useEvents.setState({ job: { id: "j1", kind: "setup" } });
+  });
+  renderPage(
+    <>
+      <JobStrip project="x" />
+      <Generate />
+    </>,
+    "/p/:name/generate",
+  );
+
+  // F3: persistent demo-mode alert, same copy as Setup
+  expect(await screen.findByTestId("demo-notice")).toBeInTheDocument();
+  expect(screen.getByText("演示模式：反馈不会改变生成内容")).toBeInTheDocument();
+
+  expect(screen.getByTestId("job-strip")).toBeInTheDocument();
+  expect(document.querySelector(".job-strip-pulse")).toBeNull();
+  fireEvent.click(await screen.findByTestId("start-generate"));
+  await waitFor(() => expect(screen.getByText("任务已在运行")).toBeInTheDocument());
+  fireEvent.click(screen.getByText("查看运行中任务"));
+  expect(useEvents.getState().stripPulse).toBe(1);
+  await waitFor(() => expect(document.querySelector(".job-strip-pulse")).not.toBeNull());
+});

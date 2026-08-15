@@ -121,6 +121,20 @@ test("force-pass gate requires a second confirming click", async () => {
   expect(JSON.parse(String(opts.body))).toEqual({ approve: true, feedback: "" });
 });
 
+test("feedback history renders under the 本阶段已提交的反馈 header", () => {
+  stubFetch();
+  renderModal();
+  act(() => {
+    useEvents.setState({ feedbackHistory: ["基调更黑暗", "增加反派戏份"] });
+    useEvents.getState().apply({
+      type: "gate", gate_id: "g1", label: "setup:world", artifact: "{}", job_id: "j1",
+    });
+  });
+  expect(screen.getByText("本阶段已提交的反馈")).toBeInTheDocument();
+  expect(screen.getByText("基调更黑暗")).toBeInTheDocument();
+  expect(screen.getByText("增加反派戏份")).toBeInTheDocument();
+});
+
 test("chapter gate links to the reader; focus returns to opener when gate clears", async () => {
   stubFetch();
   const opener = document.createElement("button");

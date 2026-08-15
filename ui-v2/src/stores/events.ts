@@ -20,9 +20,14 @@ interface EventState {
   /** Last observed job_end (seq makes repeated identical payloads re-trigger
    * consumers, e.g. the Generate page's final toast). */
   lastEnd: { status: string; error: string | null; seq: number } | null;
+  /** F2: bumped each time the Generate 409 CTA「查看运行中任务」is clicked;
+   * JobStrip watches it to briefly flash a highlight (the CTA already sits on
+   * the Generate page, so navigating would be a no-op). */
+  stripPulse: number;
   pushLine: (text: string) => void;
   setConnected: (v: boolean) => void;
   pushFeedback: (text: string) => void;
+  pulseStrip: () => void;
   apply: (ev: SseEvent) => void;
   /** Clear transient job state (gate/job/progress) but keep log lines. */
   resetTransient: () => void;
@@ -41,10 +46,12 @@ export const useEvents = create<EventState>((set) => ({
   feedbackHistory: [],
   setupArtifact: null,
   lastEnd: null,
+  stripPulse: 0,
   pushLine: (text) =>
     set((s) => ({ lines: [...s.lines, { time: fmt(), text }].slice(-MAX_LINES) })),
   setConnected: (v) => set({ connected: v }),
   pushFeedback: (text) => set((s) => ({ feedbackHistory: [...s.feedbackHistory, text] })),
+  pulseStrip: () => set((s) => ({ stripPulse: s.stripPulse + 1 })),
   apply: (ev) =>
     set((s) => {
       const patch: Partial<EventState> = {};
@@ -108,5 +115,6 @@ export const useEvents = create<EventState>((set) => ({
       feedbackHistory: [],
       setupArtifact: null,
       lastEnd: null,
+      stripPulse: 0,
     }),
 }));

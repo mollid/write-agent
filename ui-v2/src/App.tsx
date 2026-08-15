@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   BrowserRouter,
@@ -9,7 +10,7 @@ import {
   useNavigate,
   useParams,
 } from "react-router-dom";
-import { App as AntApp, ConfigProvider, Layout, Menu, Select, Tag } from "antd";
+import { App as AntApp, Button, ConfigProvider, Layout, Menu, Select, Tag } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import { useMode, useProjects } from "./api/hooks";
 import { useProjectEvents } from "./api/events";
@@ -30,6 +31,7 @@ function Shell() {
   const { name = "" } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const [collapsed, setCollapsed] = useState(false);
   const { data: mode } = useMode();
   const { data: projects = [] } = useProjects();
   useProjectEvents(name || undefined);
@@ -57,8 +59,37 @@ function Shell() {
   const selected = location.pathname.split("/")[3] ?? "overview";
   return (
     <Layout style={{ height: "100%" }}>
-      <Layout.Sider width={200} theme="light" breakpoint="lg" collapsible>
-        <div style={{ padding: 16, fontWeight: 600 }}>小说控制台</div>
+      <Layout.Sider
+        width={200}
+        theme="light"
+        breakpoint="lg"
+        collapsible
+        collapsed={collapsed}
+        onCollapse={setCollapsed}
+        trigger={null}
+      >
+        <div
+          style={{
+            padding: 16,
+            fontWeight: 600,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+          }}
+        >
+          {!collapsed && <span>小说控制台</span>}
+          {/* a11y: the default Sider trigger is a plain div with no accessible
+           * role — replace it with a labelled button */}
+          <Button
+            type="text"
+            size="small"
+            aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"}
+            onClick={() => setCollapsed(!collapsed)}
+          >
+            {collapsed ? "»" : "«"}
+          </Button>
+        </div>
         <Menu
           mode="inline"
           selectedKeys={[selected]}

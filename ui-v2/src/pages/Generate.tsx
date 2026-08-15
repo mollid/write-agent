@@ -1,9 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { App as AntApp, Button, Card, InputNumber, Progress, Space, Tag, Typography } from "antd";
+import { App as AntApp, Alert, Button, Card, InputNumber, Progress, Space, Tag, Typography } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiError } from "../api/client";
-import { useCancelJob, useOutline, useStatus, useWriteChapters } from "../api/hooks";
+import { useCancelJob, useMode, useOutline, useStatus, useWriteChapters } from "../api/hooks";
 import { useEvents } from "../stores/events";
 import { STAGE_NAMES } from "../constants";
 
@@ -16,6 +16,7 @@ export default function Generate() {
   const { message } = AntApp.useApp();
   const { data: status } = useStatus(name);
   const { data: outline } = useOutline(name);
+  const { data: mode } = useMode();
   const job = useEvents((s) => s.job);
   const progress = useEvents((s) => s.progress);
   const lastStage = useEvents((s) => s.lastStage);
@@ -39,17 +40,15 @@ export default function Generate() {
       message.info(`已开始生成 ${n} 章`);
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
-        // R6 CTA: the conflicting job may have been started from Setup/elsewhere
+        // R6 CTA: the conflicting job may have been started from Setup/elsewhere.
+        // We are already on the Generate page — pulse the JobStrip instead of a
+        // no-op navigation (F2).
         message.open({
           type: "error",
           content: (
             <span>
               {e.message}{" "}
-              <Button
-                type="link"
-                size="small"
-                onClick={() => navigate(`/p/${name}/generate`)}
-              >
+              <Button type="link" size="small" onClick={() => useEvents.getState().pulseStrip()}>
                 查看运行中任务
               </Button>
             </span>
@@ -91,6 +90,16 @@ export default function Generate() {
       <Typography.Title level={4} style={{ margin: 0 }}>
         生成章节
       </Typography.Title>
+
+      {/* F3: honest demo notice — same as Setup, persistent while on the page */}
+      {mode && !mode.live && (
+        <Alert
+          type="info"
+          showIcon
+          data-testid="demo-notice"
+          message="演示模式：反馈不会改变生成内容"
+        />
+      )}
 
       <Card size="small" title="开始 / 续写">
         <Typography.Paragraph data-testid="resume-text">

@@ -1,4 +1,5 @@
 import { Alert, Button, Space, Tag, Typography } from "antd";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useEvents } from "../stores/events";
 import { STAGE_NAMES } from "../constants";
@@ -11,13 +12,32 @@ export default function JobStrip({ project }: { project: string }) {
   const gate = useEvents((s) => s.gate);
   const connected = useEvents((s) => s.connected);
   const lastStage = useEvents((s) => s.lastStage);
+  const stripPulse = useEvents((s) => s.stripPulse);
   const navigate = useNavigate();
   const cancel = useCancelJob();
+
+  // F2: when stripPulse bumps (Generate 409 CTA clicked), flash a highlight
+  // for ~1.5s so the user's eye is drawn to the running-job strip.
+  const [pulsing, setPulsing] = useState(false);
+  const seenPulse = useRef<number | null>(null);
+  useEffect(() => {
+    if (seenPulse.current === null) {
+      seenPulse.current = stripPulse;
+      return;
+    }
+    if (stripPulse === seenPulse.current) return;
+    seenPulse.current = stripPulse;
+    setPulsing(true);
+    const t = setTimeout(() => setPulsing(false), 1500);
+    return () => clearTimeout(t);
+  }, [stripPulse]);
+
   if (!job) return null;
   const stageText = lastStage ? (STAGE_NAMES[lastStage] ?? lastStage) : null;
   return (
     <Alert
       data-testid="job-strip"
+      className={pulsing ? "job-strip-pulse" : undefined}
       type={gate ? "warning" : "info"}
       showIcon
       message={
