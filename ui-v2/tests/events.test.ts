@@ -1,4 +1,5 @@
 import { useEvents } from "../src/stores/events";
+import { describe as describeEvent } from "../src/describe";
 
 describe("event store", () => {
   beforeEach(() => useEvents.getState().reset());
@@ -81,5 +82,62 @@ describe("event store", () => {
     });
     useEvents.getState().reset();
     expect(useEvents.getState().setupArtifact).toBeNull();
+  });
+
+  test("chapter_skipped also increments progress (N4)", () => {
+    useEvents.setState({ progress: { done: 0, total: 3 } });
+    useEvents.getState().apply({ type: "chapter_done", chapter: 4, job_id: "j1" });
+    useEvents.getState().apply({
+      type: "chapter_skipped", chapter: 5, reason: "already exists", job_id: "j1",
+    });
+    expect(useEvents.getState().progress).toEqual({ done: 2, total: 3 });
+  });
+
+  test("job_end records lastEnd with a fresh sequence and clears progress", () => {
+    useEvents.setState({ progress: { done: 1, total: 3 } });
+    useEvents.getState().apply({ type: "job_end", status: "done", job_id: "j1" });
+    expect(useEvents.getState().lastEnd).toMatchObject({ status: "done", error: null, seq: 1 });
+    expect(useEvents.getState().progress).toBeNull();
+    useEvents.getState().apply({ type: "job_end", status: "error", error: "boom", job_id: "j2" });
+    expect(useEvents.getState().lastEnd).toMatchObject({ status: "error", error: "boom", seq: 2 });
+  });
+});
+
+describe("describe() log lines", () => {
+  test("maps each event type to its Chinese log line; unknown types are silent", () => {
+    expect(describeEvent({ type: "stage", stage: "writer", chapter: 3, job_id: "j" })).toBe(
+      "第 3 章 · 正文写作中",
+    );
+    expect(describeEvent({ type: "stage", stage: "resume", job_id: "j" })).toBe("从故事圣经恢复…");
+    expect(describeEvent({ type: "chapter_start", chapter: 1, title: "T1", job_id: "j" })).toBe(
+      "▶ 开始第 1 章「T1」",
+    );
+    expect(
+      describeEvent({ type: "review", chapter: 1, attempt: 2, overall: 88, passed: false, job_id: "j" }),
+    ).toBe("  评审：总分 88（第 2 次尝试）❌ 未达标");
+    expect(describeEvent({ type: "chapter_done", chapter: 1, job_id: "j" })).toBe(
+      "✔ 第 1 章完成并已保存",
+    );
+    expect(
+      describeEvent({ type: "chapter_skipped", chapter: 2, reason: "already exists", job_id: "j" }),
+    ).toBe("✖ 第 2 章被跳过：already exists");
+    expect(describeEvent({ type: "premise_done", genre: "fantasy", job_id: "j" })).toBe(
+      "✔ 故事概念已生成（genre=fantasy）",
+    );
+    expect(
+      describeEvent({ type: "setup_stage", stage: "world", attempt: 1, job_id: "j" }),
+    ).toBe("设定阶段 world：第 1 次生成（见审批卡片）");
+    expect(
+      describeEvent({ type: "setup_stage", stage: "world", skipped: true, job_id: "j" }),
+    ).toBe("设定阶段 world 已通过，跳过");
+    expect(describeEvent({ type: "gate", gate_id: "g", label: "chapter", job_id: "j" })).toBe(
+      "⚠ 等待审批：chapter",
+    );
+    expect(describeEvent({ type: "job_end", status: "done", job_id: "j" })).toBe("✅ 任务完成");
+    expect(describeEvent({ type: "job_end", status: "cancelled", job_id: "j" })).toBe("任务已取消");
+    expect(describeEvent({ type: "job_end", status: "error", error: "boom", job_id: "j" })).toBe(
+      "❌ 任务失败：boom",
+    );
+    expect(describeEvent({ type: "whatever", job_id: "j" })).toBeNull();
   });
 });

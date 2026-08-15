@@ -1,11 +1,15 @@
 import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import type { JobInfo, ProjectStatus, SseEvent } from "./types";
 import { useEvents } from "../stores/events";
+import { describe } from "../describe";
 
 export function useProjectEvents(project: string | undefined): void {
   const apply = useEvents((s) => s.apply);
   const setConnected = useEvents((s) => s.setConnected);
+  const pushLine = useEvents((s) => s.pushLine);
+  const qc = useQueryClient();
 
   useEffect(() => {
     if (!project) return;
@@ -50,7 +54,15 @@ export function useProjectEvents(project: string | undefined): void {
       };
       es.onmessage = (m) => {
         try {
-          apply(JSON.parse(m.data) as SseEvent);
+          const ev = JSON.parse(m.data) as SseEvent;
+          apply(ev);
+          const text = describe(ev);
+          if (text) pushLine(text);
+          // Facts changed server-side — let /status queries refetch so pages
+          // deriving state from the booleans (e.g. Setup's Steps) update live.
+          if (ev.type === "premise_done" || ev.type === "setup_stage" || ev.type === "job_end") {
+            void qc.invalidateQueries({ queryKey: ["status"] });
+          }
         } catch {
           /* ignore */
         }
@@ -68,5 +80,5 @@ export function useProjectEvents(project: string | undefined): void {
       es?.close();
       setConnected(false);
     };
-  }, [project, apply, setConnected]);
+  }, [project, apply, setConnected, pushLine, qc]);
 }

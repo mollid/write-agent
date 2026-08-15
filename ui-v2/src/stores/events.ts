@@ -17,6 +17,9 @@ interface EventState {
    * an `artifact`; per-STAGE, replaced as each stage generates. Cleared on job
    * death too (resetTransient) so a stale artifact never outlives its job. */
   setupArtifact: { stage: string; attempt: number; artifact: string } | null;
+  /** Last observed job_end (seq makes repeated identical payloads re-trigger
+   * consumers, e.g. the Generate page's final toast). */
+  lastEnd: { status: string; error: string | null; seq: number } | null;
   pushLine: (text: string) => void;
   setConnected: (v: boolean) => void;
   pushFeedback: (text: string) => void;
@@ -37,6 +40,7 @@ export const useEvents = create<EventState>((set) => ({
   lastStage: null,
   feedbackHistory: [],
   setupArtifact: null,
+  lastEnd: null,
   pushLine: (text) =>
     set((s) => ({ lines: [...s.lines, { time: fmt(), text }].slice(-MAX_LINES) })),
   setConnected: (v) => set({ connected: v }),
@@ -74,8 +78,16 @@ export const useEvents = create<EventState>((set) => ({
           patch.job = null;
           patch.gate = null;
           patch.progress = null;
+          patch.lastEnd = {
+            status: String(ev.status ?? "unknown"),
+            error: typeof ev.error === "string" ? ev.error : null,
+            seq: (s.lastEnd?.seq ?? 0) + 1,
+          };
           break;
         case "chapter_done":
+        case "chapter_skipped":
+          // N4: a skipped chapter is final too — count it toward progress so
+          // the bar completes even when the backend auto-skips done chapters.
           patch.progress = s.progress
             ? { ...s.progress, done: s.progress.done + 1 }
             : s.progress;
@@ -95,5 +107,6 @@ export const useEvents = create<EventState>((set) => ({
       lastStage: null,
       feedbackHistory: [],
       setupArtifact: null,
+      lastEnd: null,
     }),
 }));
