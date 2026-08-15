@@ -30,6 +30,11 @@ export function useProjectEvents(project: string | undefined): void {
               job_id: job.id,
             } as SseEvent);
           }
+        } else {
+          // Job died while disconnected (e.g. server restart): drop stale
+          // transient state — a pending gate would otherwise keep the
+          // GateModal stuck open, and resolving it would 404. Keep log lines.
+          useEvents.getState().resetTransient();
         }
       } catch {
         /* next reconnect will retry */

@@ -32,6 +32,19 @@ describe("event store", () => {
     expect(useEvents.getState().lastStage).toBe("writer");
   });
 
+  test("resetTransient clears gate/job/progress but keeps lines", () => {
+    useEvents
+      .getState()
+      .apply({ type: "gate", gate_id: "g1", label: "setup:concept", artifact: "{}", job_id: "j1" });
+    useEvents.getState().pushLine("keep me");
+    useEvents.getState().resetTransient();
+    const s = useEvents.getState();
+    expect(s.gate).toBeNull();
+    expect(s.job).toBeNull();
+    expect(s.progress).toBeNull();
+    expect(s.lines.map((l) => l.text)).toEqual(["keep me"]);
+  });
+
   test("feedback history: pushFeedback appends; setup_stage attempt 1 resets", () => {
     useEvents.getState().pushFeedback("节奏太快");
     useEvents.getState().pushFeedback("增加悬念");

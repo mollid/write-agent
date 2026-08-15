@@ -17,6 +17,8 @@ interface EventState {
   setConnected: (v: boolean) => void;
   pushFeedback: (text: string) => void;
   apply: (ev: SseEvent) => void;
+  /** Clear transient job state (gate/job/progress) but keep log lines. */
+  resetTransient: () => void;
   reset: () => void;
 }
 const MAX_LINES = 500;
@@ -69,6 +71,7 @@ export const useEvents = create<EventState>((set) => ({
       }
       return patch;
     }),
+  resetTransient: () => set({ gate: null, job: null, progress: null }),
   reset: () =>
     set({
       connected: false,
