@@ -1,18 +1,13 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from novel.agents.character import CharacterAgent
 from novel.agents.continuity import ContinuityAgent
 from novel.agents.editor import EditorAgent
-from novel.agents.outliner import OutlinerAgent
 from novel.agents.scorer import ScorerAgent
-from novel.agents.strategist import StrategistAgent
-from novel.agents.worldbuilder import WorldbuilderAgent
 from novel.agents.writer import WriterAgent
 from novel.config import ModelConfig
 from novel.memory.assembler import assemble_context
@@ -22,6 +17,7 @@ from novel.project import NovelProject
 from novel.providers import ModelProvider
 from novel.resume import is_chapter_complete
 from novel.scorer_rubrics import apply_review, decide
+from novel.setup_flow import approve_stage, generate_stage, stage_done
 from novel.store.bible import StoryBible
 from novel.store.reviews import ReviewStore
 from novel.store.vector import VectorMemory
@@ -34,12 +30,6 @@ class PipelineState:
     last_review: ReviewScore | None = None
     human_overrides: dict[str, object] = field(default_factory=dict)
     error: str | None = None
-
-
-def _parse_ch(ref: str) -> int | None:
-    """Best-effort: 'c03-b01' / 'ch3' -> 3."""
-    m = re.search(r"(\d+)", ref)
-    return int(m.group(1)) if m else None
 
 
 def _scored(producer_out: str, artifact_type: str, artifact_json: str, scorer: ScorerAgent,
@@ -67,34 +57,25 @@ def run_full_pipeline(
     def agent(name: str) -> ModelConfig:
         return cfg_map[name]
 
-    if start_chapter <= 1:
-        # --- SETUP ---
-        emit({"type": "stage", "stage": "strategist"})
-        concept = StrategistAgent(provider, agent("strategist")).run(premise)
-        bible.set_concept(concept)
-        emit({"type": "stage", "stage": "worldbuilder"})
-        world = WorldbuilderAgent(provider, agent("worldbuilder")).run(concept)
-        bible.set_world(world)
-        emit({"type": "stage", "stage": "character"})
-        chars = CharacterAgent(provider, agent("character")).run((concept, world))
-        for ch in chars:
-            bible.upsert_character(ch)
-        emit({"type": "stage", "stage": "outliner"})
-        outline = OutlinerAgent(provider, agent("outliner")).run((concept, world, chars))
-        bible.set_outline(outline)
-        for entry in outline.foreshadow_ledger:
-            if not any(f.id == entry.id for f in bible.list_foreshadow()):
-                bible.add_foreshadow(Foreshadow(
-                    id=entry.id, description=entry.description,
-                    planted_ch=_parse_ch(entry.planted_in), status=ForeshadowStatus.OPEN))
+    if start_chapter <= 1 and bible.get_outline() is None:
+        # --- SETUP (one-shot auto mode; guided mode = `novel setup` approved these already) ---
+        for stage, agent_name in (("concept", "strategist"), ("world", "worldbuilder"),
+                                  ("characters", "character"), ("outline", "outliner")):
+            emit({"type": "stage", "stage": agent_name})
+            if stage_done(stage, bible):
+                continue  # half-finished guided setup: only fill the gaps
+            artifact = generate_stage(stage, provider=provider, cfg_map=cfg_map,
+                                      bible=bible, premise=premise)
+            approve_stage(stage, artifact, bible)
+        outline = bible.get_outline()
+        assert outline is not None
         if on_gate:
             on_gate("outline", outline)
         chapter_no = 0
     else:
         # --- RESUME: skip SETUP, load persisted bible state ---
-        _outline = bible.get_outline()
-        assert _outline is not None, "no outline to resume from"
-        outline = _outline
+        outline = bible.get_outline()
+        assert outline is not None, "no outline to resume from"
         saved_concept = bible.get_concept()
         premise = premise or (saved_concept.logline if saved_concept else "")
         chapter_no = start_chapter - 1
