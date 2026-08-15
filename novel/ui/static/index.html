@@ -36,6 +36,7 @@
       <div class="row">
         <input id="premise-input" type="text" placeholder="一句话创意，例如：一名能偷走时间的盗贼">
         <button id="btn-premise">生成概念</button>
+        <button id="btn-setup" type="button">分阶段设定（标准模式）</button>
       </div>
       <div class="row">
         <label>生成章节数 <input id="chapter-count" type="number" min="1" max="50" value="3"></label>
@@ -49,6 +50,7 @@
         <h3>⚠ 审批请求</h3>
         <div id="gate-label" class="gate-label"></div>
         <pre id="gate-artifact" class="gate-artifact"></pre>
+        <textarea id="gate-feedback" rows="3" placeholder="修改意见（自然语言），系统会带着意见重新生成该阶段…" hidden></textarea>
         <div class="row">
           <button id="btn-approve" class="primary">✅ 批准</button>
           <button id="btn-reject" class="danger">❌ 拒绝</button>
