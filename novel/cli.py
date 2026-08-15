@@ -58,6 +58,50 @@ def premise(text: str, project: Path | None = _project_opt) -> None:
     console.print(f"[green]Concept saved.[/green] genre={concept.genre}")
 
 
+@app.command()
+def setup(premise: str = typer.Option("", "--premise", "-m",
+                                      help="one-line premise (prompted if omitted)"),
+          project: Path | None = _project_opt) -> None:
+    """Guided setup (标准模式): approve or refine each stage with natural-language feedback."""
+    proj = _load_project(project)
+    cfg = load_config(proj.config_path)
+    provider = make_provider(cfg)
+    bible = StoryBible(proj)
+    from novel.runtime import AGENT_NAMES, is_live_mode
+    from novel.setup_flow import SETUP_STAGES, approve_stage, generate_stage, stage_done
+    from novel.ui.jobs import artifact_text
+    cfg_map = {name: cfg.model_for(name) for name in AGENT_NAMES}
+    if not premise:
+        saved = bible.get_concept()
+        premise = saved.logline if saved else typer.prompt("Premise")
+    if not is_live_mode():
+        console.print("[yellow]演示模式：反馈不会改变生成内容。[/yellow]")
+    for stage in SETUP_STAGES:
+        if stage_done(stage, bible):
+            console.print(f"[green]✓ {stage} 已通过，跳过[/green]")
+            continue
+        feedback: list[str] = []
+        while True:
+            console.rule(f"[bold cyan]{stage}[/bold cyan]（第 {len(feedback) + 1} 次生成）")
+            artifact = generate_stage(stage, provider=provider, cfg_map=cfg_map,
+                                      bible=bible, premise=premise, feedback=feedback)
+            console.print(artifact_text(artifact)[:2000])
+            choice = typer.prompt("通过(a) / 反馈(f) / 退出(q)", default="a")
+            if choice in ("a", ""):
+                approve_stage(stage, artifact, bible)
+                console.print(f"[green]✓ {stage} 已通过并存入故事圣经[/green]")
+                break
+            if choice == "q":
+                console.print("[yellow]Setup 已停止；已通过的阶段已保存，重跑 setup 可继续。[/yellow]")
+                return
+            if choice == "f":
+                fb = typer.prompt("反馈意见")
+                if fb.strip():
+                    feedback.append(fb.strip())
+                continue
+            console.print("[red]无效选择，请输入 a / f / q[/red]")
+
+
 @app.command(name="write-chapter")
 def write_chapter(n: int = typer.Argument(1, help="number of chapters to write"),
                   project: Path | None = _project_opt) -> None:
