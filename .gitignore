@@ -29,3 +29,7 @@ project.config.yaml
 .idea/
 .vscode/
 .DS_Store
+
+# ui-v2 (npm)
+ui-v2/node_modules/
+ui-v2/dist/
