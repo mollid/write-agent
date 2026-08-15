@@ -9,22 +9,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Empty, Queue
 
-from pydantic import BaseModel
+from novel.render import artifact_text
 
 
 class JobCancelled(Exception):
     """Raised inside a job thread when cancellation was requested."""
-
-
-def artifact_text(obj: object) -> str:
-    """Render a gate artifact (pydantic model / int / str) to displayable text."""
-    if isinstance(obj, BaseModel):
-        try:
-            import json
-            return json.dumps(json.loads(obj.model_dump_json()), ensure_ascii=False, indent=2)
-        except Exception:  # noqa: BLE001 - display only
-            return str(obj)
-    return str(obj)
 
 
 @dataclass

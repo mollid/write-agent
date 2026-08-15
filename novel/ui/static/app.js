@@ -333,6 +333,8 @@ async function startPremise() {
 async function startSetup() {
   const premiseText = $("premise-input").value.trim();
   try {
+    const mode = await api("/api/mode");
+    if (!mode.live) log("⚠ 演示模式：反馈不会改变生成内容");
     const r = await api(`/api/projects/${state.project}/setup`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

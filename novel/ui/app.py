@@ -123,6 +123,11 @@ def create_app(root: Path) -> FastAPI:
     @app.post("/api/projects/{name}/setup", status_code=202)
     def start_setup(name: str, req: SetupReq) -> dict[str, str]:
         p = _safe_project(root, name)
+        if not req.premise:
+            from novel.project import NovelProject
+            from novel.store.bible import StoryBible
+            if StoryBible(NovelProject(root=p)).get_concept() is None:
+                raise HTTPException(status_code=422, detail="缺少创意：请提供 premise 或先运行 premise/setup")
         try:
             job = manager.start(name, "setup", jobs.run_setup_job(p, req.premise))
         except RuntimeError as e:
@@ -190,7 +195,7 @@ def create_app(root: Path) -> FastAPI:
 
     @app.post("/api/gates/{gate_id}")
     def resolve_gate(gate_id: str, req: GateReq) -> dict[str, bool]:
-        ok = manager.resolve_gate(gate_id, req.approve, req.feedback or None)
+        ok = manager.resolve_gate(gate_id, req.approve, (req.feedback or "").strip() or None)
         if not ok:
             raise HTTPException(status_code=404, detail="审批请求不存在或已处理")
         return {"resolved": True}

@@ -245,6 +245,14 @@ def _next_gate(q, job_id: str, timeout: float = 10.0) -> str | None:
     raise AssertionError("no gate event in time")
 
 
+def test_setup_endpoint_requires_premise_or_concept(client: TestClient) -> None:
+    """Empty premise on a fresh project (no concept) -> 422."""
+    client.post("/api/projects", json={"name": "sf"})
+    r = client.post("/api/projects/sf/setup", json={"premise": ""})
+    assert r.status_code == 422
+    assert "缺少创意" in r.json()["detail"]
+
+
 def test_setup_endpoint_full_flow(client: TestClient) -> None:
     client.post("/api/projects", json={"name": "sx"})
     r = client.post("/api/projects/sx/setup", json={"premise": "a thief"})

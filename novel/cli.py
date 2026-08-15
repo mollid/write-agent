@@ -67,9 +67,9 @@ def setup(premise_text: str = typer.Option("", "--premise", "-m",
     cfg = load_config(proj.config_path)
     provider = make_provider(cfg)
     bible = StoryBible(proj)
+    from novel.render import artifact_text
     from novel.runtime import AGENT_NAMES
     from novel.setup_flow import SETUP_STAGES, approve_stage, generate_stage, stage_done
-    from novel.ui.jobs import artifact_text
     cfg_map = {name: cfg.model_for(name) for name in AGENT_NAMES}
     if not premise_text:
         saved = bible.get_concept()
