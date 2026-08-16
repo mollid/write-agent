@@ -13,6 +13,8 @@ export default function JobStrip({ project }: { project: string }) {
   const connected = useEvents((s) => s.connected);
   const lastStage = useEvents((s) => s.lastStage);
   const stripPulse = useEvents((s) => s.stripPulse);
+  const dismissed = useEvents((s) => s.gateDismissed);
+  const reopenGate = useEvents((s) => s.reopenGate);
   const navigate = useNavigate();
   const cancel = useCancelJob();
 
@@ -48,6 +50,11 @@ export default function JobStrip({ project }: { project: string }) {
             <Tag data-testid="job-stage">{stageText}</Tag>
           ) : null}
           {gate ? <Tag color="orange">{gate.label}</Tag> : null}
+          {gate && dismissed ? (
+            <Button size="small" type="primary" data-testid="reopen-gate" onClick={reopenGate}>
+              打开审批
+            </Button>
+          ) : null}
           {progress && progress.total ? (
             <Tag>
               章节 {Math.min(progress.done, progress.total)}/{progress.total}

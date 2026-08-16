@@ -156,3 +156,51 @@ test("chapter gate links to the reader; focus returns to opener when gate clears
   expect(document.activeElement).toBe(opener);
   opener.remove();
 });
+
+test("close button dismisses the modal but the gate stays pending; reopen restores it", async () => {
+  stubFetch();
+  renderModal();
+  act(() => {
+    useEvents.getState().apply({
+      type: "gate", gate_id: "g9", label: "setup:concept", artifact: "{}", job_id: "j1",
+    });
+  });
+  expect(screen.getByTestId("gate-modal")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /close/i }));
+  await waitFor(() => expect(screen.queryByTestId("gate-modal")).not.toBeInTheDocument());
+  // gate still pending server-side: store keeps it
+  expect(useEvents.getState().gate?.id).toBe("g9");
+  expect(useEvents.getState().gateDismissed).toBe(true);
+
+  act(() => {
+    useEvents.getState().reopenGate();
+  });
+  expect(screen.getByTestId("gate-modal")).toBeInTheDocument();
+
+  // a NEW gate event always un-dismisses
+  fireEvent.click(screen.getByRole("button", { name: /close/i }));
+  await waitFor(() => expect(screen.queryByTestId("gate-modal")).not.toBeInTheDocument());
+  act(() => {
+    useEvents.getState().apply({
+      type: "gate", gate_id: "g10", label: "setup:world", artifact: "{}", job_id: "j1",
+    });
+  });
+  expect(screen.getByTestId("gate-modal")).toBeInTheDocument();
+});
+
+test("JSON artifacts are pretty-printed regardless of wire compactness", () => {
+  stubFetch();
+  renderModal();
+  act(() => {
+    useEvents.getState().apply({
+      type: "gate",
+      gate_id: "g11",
+      label: "setup:outline",
+      artifact: '{"arcs":[{"arc_name":"A"}]}',
+      job_id: "j1",
+    });
+  });
+  const text = screen.getByTestId("gate-artifact").textContent ?? "";
+  expect(text).toContain('\n  "arcs"');
+});

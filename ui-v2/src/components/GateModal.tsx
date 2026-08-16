@@ -5,10 +5,25 @@ import { useEvents } from "../stores/events";
 import { useResolveGate } from "../api/hooks";
 import { GATE_LABELS, SETUP_STAGE_NAMES } from "../constants";
 
+/** Ensure JSON artifacts always display pretty, whatever the wire format. */
+function prettyArtifact(raw: string): string {
+  const text = raw.trim();
+  if (!text.startsWith("{") && !text.startsWith("[")) return raw;
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return raw;
+  }
+}
+
 /** R4: global approval modal. Setup gates carry a feedback box; the
- * force-pass gate requires an explicit second confirmation step. */
+ * force-pass gate requires an explicit second confirmation step. The X
+ * button only DISMISSES the modal — the job keeps waiting server-side and
+ * the JobStrip offers「打开审批」to bring it back. */
 export default function GateModal({ project }: { project: string }) {
   const gate = useEvents((s) => s.gate);
+  const dismissed = useEvents((s) => s.gateDismissed);
+  const dismissGate = useEvents((s) => s.dismissGate);
   const feedbackHistory = useEvents((s) => s.feedbackHistory);
   const pushFeedback = useEvents((s) => s.pushFeedback);
   const resolve = useResolveGate();
@@ -29,7 +44,7 @@ export default function GateModal({ project }: { project: string }) {
     }
   }, [gate]);
 
-  if (!gate) return null;
+  if (!gate || dismissed) return null;
   const isSetup = gate.label.startsWith("setup:");
   const isForce = gate.label === "chapter_review_failed";
   const title = isSetup
@@ -59,7 +74,9 @@ export default function GateModal({ project }: { project: string }) {
     <Modal
       open
       title={title}
-      closable={false}
+      closable
+      maskClosable={false}
+      onCancel={() => dismissGate()}
       footer={null}
       width={720}
       data-testid="gate-modal"
@@ -72,7 +89,7 @@ export default function GateModal({ project }: { project: string }) {
         </Typography.Paragraph>
       ) : gate.artifact ? (
         <pre data-testid="gate-artifact" style={{ whiteSpace: "pre-wrap", maxHeight: 320, overflow: "auto" }}>
-          {gate.artifact.slice(0, 4000)}
+          {prettyArtifact(gate.artifact.slice(0, 4000))}
         </pre>
       ) : (
         <Typography.Text type="secondary">（产物内容不可用——重连恢复的审批）</Typography.Text>

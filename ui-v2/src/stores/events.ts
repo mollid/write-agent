@@ -24,10 +24,15 @@ interface EventState {
    * JobStrip watches it to briefly flash a highlight (the CTA already sits on
    * the Generate page, so navigating would be a no-op). */
   stripPulse: number;
+  /** True while the user dismissed the gate modal without deciding; a NEW gate
+   * event or「打开审批」flips it back. The job keeps waiting server-side. */
+  gateDismissed: boolean;
   pushLine: (text: string) => void;
   setConnected: (v: boolean) => void;
   pushFeedback: (text: string) => void;
   pulseStrip: () => void;
+  dismissGate: () => void;
+  reopenGate: () => void;
   apply: (ev: SseEvent) => void;
   /** Clear transient job state (gate/job/progress) but keep log lines. */
   resetTransient: () => void;
@@ -47,11 +52,14 @@ export const useEvents = create<EventState>((set) => ({
   setupArtifact: null,
   lastEnd: null,
   stripPulse: 0,
+  gateDismissed: false,
   pushLine: (text) =>
     set((s) => ({ lines: [...s.lines, { time: fmt(), text }].slice(-MAX_LINES) })),
   setConnected: (v) => set({ connected: v }),
   pushFeedback: (text) => set((s) => ({ feedbackHistory: [...s.feedbackHistory, text] })),
   pulseStrip: () => set((s) => ({ stripPulse: s.stripPulse + 1 })),
+  dismissGate: () => set({ gateDismissed: true }),
+  reopenGate: () => set({ gateDismissed: false }),
   apply: (ev) =>
     set((s) => {
       const patch: Partial<EventState> = {};
@@ -65,6 +73,7 @@ export const useEvents = create<EventState>((set) => ({
           patch.lastStage = String(ev.stage);
           break;
         case "gate":
+          patch.gateDismissed = false;
           patch.gate = {
             id: String(ev.gate_id),
             label: String(ev.label),
@@ -103,7 +112,7 @@ export const useEvents = create<EventState>((set) => ({
       return patch;
     }),
   resetTransient: () =>
-    set({ gate: null, job: null, progress: null, setupArtifact: null }),
+    set({ gate: null, job: null, progress: null, setupArtifact: null, gateDismissed: false }),
   reset: () =>
     set({
       connected: false,
@@ -116,5 +125,6 @@ export const useEvents = create<EventState>((set) => ({
       setupArtifact: null,
       lastEnd: null,
       stripPulse: 0,
+      gateDismissed: false,
     }),
 }));
