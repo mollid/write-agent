@@ -1,6 +1,6 @@
 import { App as AntApp, Alert, Button, Card, Input, Space, Steps, Typography } from "antd";
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useMode, usePremise, useSetup, useStatus } from "../api/hooks";
 import { useEvents } from "../stores/events";
 import { SETUP_STAGE_NAMES } from "../constants";
@@ -11,6 +11,7 @@ import { ArtifactView } from "../components/ArtifactView";
  * progress (Steps + latest artifact) and starts the two jobs. */
 export default function Setup() {
   const { name = "" } = useParams();
+  const navigate = useNavigate();
   const { data: status } = useStatus(name);
   const { data: mode } = useMode();
   const job = useEvents((s) => s.job);
@@ -19,6 +20,35 @@ export default function Setup() {
   const setup = useSetup(name);
   const [text, setText] = useState("");
   const { message } = AntApp.useApp();
+
+  // 409 (job already running) gets an actionable CTA, not a dead-end error
+  function jobConflict(e: unknown) {
+    message.open({
+      type: "error",
+      content: (
+        <span>
+          {String(e instanceof Error ? e.message : e)}{" "}
+          <a
+            role="button"
+            tabIndex={0}
+            onClick={() => {
+              useEvents.getState().pulseStrip();
+              navigate(`/p/${name}/generate`);
+            }}
+            onKeyDown={(ev) => {
+              if (ev.key === "Enter") {
+                useEvents.getState().pulseStrip();
+                navigate(`/p/${name}/generate`);
+              }
+            }}
+          >
+            查看运行中任务
+          </a>
+        </span>
+      ),
+      duration: 6,
+    });
+  }
 
   const hasConcept = !!status?.has_concept;
   const hasWorld = !!status?.has_world;
@@ -50,7 +80,7 @@ export default function Setup() {
       // Concept lands via SSE premise_done → status invalidation (events hook)
       message.info("概念生成中…");
     } catch (e) {
-      message.error(String(e instanceof Error ? e.message : e));
+      jobConflict(e);
     }
   }
 
@@ -59,7 +89,7 @@ export default function Setup() {
       await setup.mutateAsync({ premise: "" });
       message.info("分阶段设定开始——每个阶段的审批弹窗会依次出现");
     } catch (e) {
-      message.error(String(e instanceof Error ? e.message : e));
+      jobConflict(e);
     }
   }
 

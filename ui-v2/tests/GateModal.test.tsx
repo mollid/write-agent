@@ -143,11 +143,12 @@ test("chapter gate links to the reader; focus returns to opener when gate clears
   renderModal();
   act(() => {
     useEvents.getState().apply({
-      type: "gate", gate_id: "g3", label: "chapter", artifact: "prose", job_id: "j1",
+      type: "gate", gate_id: "g3", label: "chapter", artifact: "3", job_id: "j1",
     });
   });
-  expect(screen.getByText("查看本章")).toHaveAttribute("href", "/p/x/reader");
-  expect(screen.getByTestId("gate-artifact")).toHaveTextContent("prose");
+  expect(screen.getByText("查看本章")).toHaveAttribute("href", "/p/x/reader?chapter=3");
+  // R4: chapter gates carry the chapter number, never a bare unlabelled artifact
+  expect(screen.getByTestId("gate-artifact")).toHaveTextContent("第 3 章");
   act(() => {
     useEvents.getState().apply({ type: "job_end", job_id: "j1" });
   });

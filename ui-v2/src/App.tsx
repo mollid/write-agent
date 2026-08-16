@@ -68,7 +68,12 @@ function Shell() {
         onCollapse={setCollapsed}
         trigger={null}
       >
+        {/* clickable title = the only way back to the project list from /p/:name */}
         <div
+          data-testid="home-link"
+          role="button"
+          tabIndex={0}
+          aria-label="返回项目列表"
           style={{
             padding: 16,
             fontWeight: 600,
@@ -76,6 +81,11 @@ function Shell() {
             alignItems: "center",
             justifyContent: "space-between",
             gap: 8,
+            cursor: "pointer",
+          }}
+          onClick={() => navigate("/")}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") navigate("/");
           }}
         >
           {!collapsed && <span>小说控制台</span>}

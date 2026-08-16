@@ -37,7 +37,7 @@ export default function Overview() {
       {!status.has_concept && (
         <Card data-testid="overview-cta">
           <Space wrap>
-            <Typography.Text strong>还没有故事概念——从一个创意开始整部小说（R1）</Typography.Text>
+            <Typography.Text strong>还没有故事概念——从一个创意开始整部小说</Typography.Text>
             <Link to={`/p/${name}/setup`}>
               <Button type="primary" data-testid="overview-cta-button">
                 从一句创意开始 →

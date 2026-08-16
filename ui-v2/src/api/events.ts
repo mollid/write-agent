@@ -25,6 +25,10 @@ export function useProjectEvents(project: string | undefined): void {
         const status = await api<ProjectStatus>(`/api/projects/${project}/status`);
         if (status.job) {
           const job = await api<JobInfo>(`/api/jobs/${status.job.id}`);
+          // Drop any locally-held gate first: it may have been resolved while
+          // disconnected (another tab) — re-resolving it would 404. Pending
+          // gates from the server are re-applied right after.
+          useEvents.setState({ gate: null });
           for (const g of job.gates) {
             useEvents.getState().apply({
               type: "gate",

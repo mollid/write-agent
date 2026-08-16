@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import App from "../src/App";
 import { useEvents } from "../src/stores/events";
@@ -57,6 +57,15 @@ test("/p/x/overview renders shell: selector, grouped Sider, demo badge, page; no
   await waitFor(() => expect(screen.getByText("演示模式")).toBeInTheDocument());
   expect(screen.getByTestId("page-overview")).toBeInTheDocument();
   expect(screen.queryByTestId("job-strip")).not.toBeInTheDocument();
+});
+
+test("sider title navigates back to the project list", async () => {
+  stubFetch();
+  vi.stubGlobal("EventSource", FakeEventSource);
+  window.history.pushState({}, "", "/p/x/overview");
+  render(<App />);
+  fireEvent.click(screen.getByTestId("home-link"));
+  await waitFor(() => expect(screen.getByTestId("page-projects")).toBeInTheDocument());
 });
 
 test("JobStrip appears with visible stage label when a job is running", async () => {

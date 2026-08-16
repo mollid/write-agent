@@ -65,17 +65,17 @@ export default function GateModal({ project }: { project: string }) {
       data-testid="gate-modal"
       aria-live="polite"
     >
-      {gate.artifact ? (
+      {gate.label === "chapter" ? (
+        <Typography.Paragraph data-testid="gate-artifact">
+          第 <strong>{gate.artifact.trim() || "?"}</strong> 章生成完毕并通过评分。继续写作下一章？（
+          <Link to={`/p/${project}/reader?chapter=${gate.artifact.trim()}`}>查看本章</Link>）
+        </Typography.Paragraph>
+      ) : gate.artifact ? (
         <pre data-testid="gate-artifact" style={{ whiteSpace: "pre-wrap", maxHeight: 320, overflow: "auto" }}>
           {gate.artifact.slice(0, 4000)}
         </pre>
       ) : (
         <Typography.Text type="secondary">（产物内容不可用——重连恢复的审批）</Typography.Text>
-      )}
-      {gate.label === "chapter" && (
-        <Typography.Paragraph>
-          <Link to={`/p/${project}/reader`}>查看本章</Link>
-        </Typography.Paragraph>
       )}
       {isSetup && (
         <>
@@ -115,7 +115,7 @@ export default function GateModal({ project }: { project: string }) {
           danger={isForce && confirmForce}
           onClick={() => submit(false, feedback)}
         >
-          {isSetup ? "带反馈重生成" : isForce ? "放行前再想想（取消）" : "拒绝"}
+          {isSetup ? "带反馈重生成" : isForce ? "跳过本章（本章将不保存）" : "拒绝"}
         </Button>
       </Space>
     </Modal>
