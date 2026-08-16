@@ -6,14 +6,16 @@ import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from novel.ui import jobs
 
 STATIC_DIR = Path(__file__).parent / "static"
+DIST_DIR = Path(__file__).resolve().parents[2] / "ui-v2" / "dist"
 
 
 class CreateProjectReq(BaseModel):
@@ -232,5 +234,30 @@ def create_app(root: Path) -> FastAPI:
                 "gates": [{"id": g.id, "label": g.label}
                           for g in job.gates.values() if not g.done.is_set()]}
 
-    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+    app.mount("/legacy", StaticFiles(directory=STATIC_DIR, html=True), name="legacy")
+    if DIST_DIR.is_dir():
+        app.mount("/", StaticFiles(directory=DIST_DIR, html=True), name="ui-v2")
+
+        @app.exception_handler(StarletteHTTPException)
+        async def spa_fallback(request: Request, exc: StarletteHTTPException) -> Response:
+            """Serve the SPA shell for deep links like /p/x/overview.
+
+            StaticFiles(html=True) 404s on unknown paths because no such file
+            exists; the SPA router handles those client-side instead.
+            """
+            path = request.url.path
+            if (
+                exc.status_code == 404
+                and not path.startswith("/api")
+                and not path.startswith("/legacy")
+            ):
+                return FileResponse(DIST_DIR / "index.html")
+            return JSONResponse(
+                {"detail": exc.detail},
+                status_code=exc.status_code,
+                headers=getattr(exc, "headers", None),
+            )
+
+    else:
+        app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static-fallback")
     return app

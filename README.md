@@ -58,12 +58,36 @@ export         合并章节并导出 Markdown 小说
 uv run novel-ui
 ```
 
-启动后会自动打开浏览器访问 `http://127.0.0.1:8765`（可用 `--no-browser` 关闭自动打开）。常用参数：
+启动后会自动打开浏览器访问 `http://127.0.0.1:8765`（可用 `--no-browser` 关闭自动打开）。界面是新版的 React 控制台 SPA（`ui-v2/`，构建产物由服务端直接伺服）。常用参数：
 
 ```bash
 uv run novel-ui --root ./my-novels   # 指定项目所在根目录（默认当前目录）
 uv run novel-ui --port 9000          # 指定端口
 ```
+
+### 前端开发模式（两进程）
+
+修改 `ui-v2/` 前端代码时不需要每次重新构建，用两个进程进行开发：
+
+```bash
+# 终端 1：后端 API（8765 端口）
+uv run novel-ui --no-browser
+
+# 终端 2：Vite 开发服务器（5173 端口，已配置将 /api 代理到 8765）
+cd ui-v2 && npm run dev
+```
+
+然后浏览器访问 `http://127.0.0.1:5173`（享受热更新）。前端测试与类型检查：`cd ui-v2 && npm run test && npm run typecheck`。
+
+### 构建与发布
+
+`uv run novel-ui` 伺服的是 `ui-v2/dist/` 里的构建产物（该目录不入库），发布/演示前请先构建：
+
+```bash
+cd ui-v2 && npm install && npm run build
+```
+
+若 `ui-v2/dist/` 不存在，`/` 会自动退回旧版界面。对等功能验收完成之前的过渡期内，旧版原生 JS 界面仍可通过 `/legacy` 访问（`http://127.0.0.1:8765/legacy/`）。
 
 说明：
 

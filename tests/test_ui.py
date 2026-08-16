@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from novel.ui import jobs
-from novel.ui.app import create_app
+from novel.ui.app import DIST_DIR, create_app
 
 
 @pytest.fixture()
@@ -302,3 +302,25 @@ def test_outline_endpoint(client: TestClient) -> None:
     assert titles == ["T1", "T2", "T3"][: len(titles)] and len(titles) == 3
     assert set(outline["arcs"][0]["chapters"][0]) == {"chapter_no", "chapter_title"}
     assert client.get("/api/projects/nope/outline").status_code == 404
+
+
+@pytest.mark.skipif(not DIST_DIR.is_dir(), reason="ui-v2/dist not built (requires Node)")
+def test_ui_v2_dist_served(tmp_path: Path) -> None:
+    """With a built ui-v2 dist, / serves the SPA, /legacy the old UI, deep links fall back."""
+    client = TestClient(create_app(tmp_path))
+    r = client.get("/")
+    assert r.status_code == 200
+    assert 'id="root"' in r.text
+    assert "小说生成控制台" in r.text
+    r = client.get("/legacy/")
+    assert r.status_code == 200
+    assert "多智能体小说生成" in r.text
+    r = client.get("/api/mode")
+    assert r.status_code == 200 and r.json() == {"live": False}
+    # SPA deep link (no such file on disk) must serve the SPA shell, not 404
+    r = client.get("/p/x/overview")
+    assert r.status_code == 200
+    assert 'id="root"' in r.text
+    # API 404s must stay JSON 404s, never the SPA shell
+    r = client.get("/api/nope")
+    assert r.status_code == 404 and "detail" in r.json()

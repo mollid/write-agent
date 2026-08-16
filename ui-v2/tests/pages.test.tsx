@@ -3,12 +3,20 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import type { ReactElement } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { App as AntApp } from "antd";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useSearchParams } from "react-router-dom";
 import Setup from "../src/pages/Setup";
 import Generate from "../src/pages/Generate";
+import Reader from "../src/pages/Reader";
+import Reviews from "../src/pages/Reviews";
+import Threads from "../src/pages/Threads";
+import Export from "../src/pages/Export";
+import Projects from "../src/pages/Projects";
+import Overview from "../src/pages/Overview";
+import JobStrip from "../src/components/JobStrip";
 import { ArtifactView } from "../src/components/ArtifactView";
+import { Trend, trendPoints } from "../src/components/Trend";
 import { useEvents } from "../src/stores/events";
-import type { ProjectStatus } from "../src/api/types";
+import type { ProjectStatus, ReviewRecord } from "../src/api/types";
 
 // ---------- helpers ----------
 
@@ -360,9 +368,6 @@ test("Generate: log lines render; job_end toasts and invalidates", async () => {
 
 // ---------- Reader page (T8 + F1) ----------
 
-import Reader from "../src/pages/Reader";
-import { useSearchParams } from "react-router-dom";
-
 function SearchProbe() {
   const [sp] = useSearchParams();
   return <div data-testid="search-probe">{sp.toString()}</div>;
@@ -414,10 +419,6 @@ test("Reader: empty state links to the generate page", async () => {
 });
 
 // ---------- Reviews page + Trend (T8) ----------
-
-import Reviews from "../src/pages/Reviews";
-import { Trend, trendPoints } from "../src/components/Trend";
-import type { ReviewRecord } from "../src/api/types";
 
 const REVIEWS: ReviewRecord[] = [
   {
@@ -498,8 +499,6 @@ test("Reviews: empty state when no records; Trend needs ≥2 points; last attemp
 
 // ---------- Threads page (T8) ----------
 
-import Threads from "../src/pages/Threads";
-
 test("Threads: table with status tags (color + text) and teaching empty state", async () => {
   stubFetchFor({
     threads: [
@@ -522,8 +521,6 @@ test("Threads: table with status tags (color + text) and teaching empty state", 
 
 // ---------- Export page (T8) ----------
 
-import Export from "../src/pages/Export";
-
 test("Export: button POSTs, path shown copyable with note", async () => {
   const fetchMock = stubFetchFor({ exportPath: "/tmp/novels/x/export/x.md" });
   renderPage(<Export />, "/p/:name/export");
@@ -538,8 +535,6 @@ test("Export: button POSTs, path shown copyable with note", async () => {
 });
 
 // ---------- Projects page (T9) ----------
-
-import Projects from "../src/pages/Projects";
 
 test("Projects: cards with enter button; empty name blocked by validation", async () => {
   const fetchMock = stubFetchFor({ projects: [{ name: "alpha" }] });
@@ -594,8 +589,6 @@ test("Projects: 409 conflict surfaces as an error message", async () => {
 
 // ---------- Overview page (T9) ----------
 
-import Overview from "../src/pages/Overview";
-
 test("Overview: !has_concept → hero CTA to setup; empty-chapters state links", async () => {
   stubFetchFor({ status: { has_concept: false, chapters: [], open_threads: 0 } });
   renderPage(<Overview />, "/p/:name/overview");
@@ -636,8 +629,6 @@ test("Overview: stats state when concept exists — tags, latest chapter link, t
 });
 
 // ---------- F2: Generate 409 CTA pulses the JobStrip; F3 demo notice ----------
-
-import JobStrip from "../src/components/JobStrip";
 
 test("Generate: 409 CTA pulses JobStrip instead of no-op navigate (F2); demo notice (F3)", async () => {
   stubFetchFor({ postStatus: 409, postDetail: "任务已在运行" });
