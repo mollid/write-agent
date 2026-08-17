@@ -29,6 +29,9 @@ interface EventState {
   gateDismissed: boolean;
   bibleProposal: { section: string; diff: string; gateId: string; draft: unknown } | null;
   outlineProposal: { added: number; diff: string; gateId: string } | null;
+  /** Task 9: last bible_chat_done outcome (seq re-triggers repeated payloads);
+   * BibleChat panels watch it to flip their pending history entry. */
+  bibleChatDone: { section: string; applied: boolean; seq: number } | null;
   pushLine: (text: string) => void;
   setConnected: (v: boolean) => void;
   pushFeedback: (text: string) => void;
@@ -57,6 +60,7 @@ export const useEvents = create<EventState>((set) => ({
   gateDismissed: false,
   bibleProposal: null,
   outlineProposal: null,
+  bibleChatDone: null,
   pushLine: (text) =>
     set((s) => ({ lines: [...s.lines, { time: fmt(), text }].slice(-MAX_LINES) })),
   setConnected: (v) => set({ connected: v }),
@@ -131,6 +135,11 @@ export const useEvents = create<EventState>((set) => ({
           break;
         case "bible_chat_done":
           patch.bibleProposal = null;
+          patch.bibleChatDone = {
+            section: String(ev.section ?? ""),
+            applied: Boolean(ev.applied),
+            seq: (s.bibleChatDone?.seq ?? 0) + 1,
+          };
           break;
         case "outline_extend_proposal":
           patch.outlineProposal = {
@@ -147,7 +156,7 @@ export const useEvents = create<EventState>((set) => ({
   resetTransient: () =>
     set({
       gate: null, job: null, progress: null, setupArtifact: null, gateDismissed: false,
-      bibleProposal: null, outlineProposal: null,
+      bibleProposal: null, outlineProposal: null, bibleChatDone: null,
     }),
   reset: () =>
     set({
@@ -164,5 +173,6 @@ export const useEvents = create<EventState>((set) => ({
       gateDismissed: false,
       bibleProposal: null,
       outlineProposal: null,
+      bibleChatDone: null,
     }),
 }));
