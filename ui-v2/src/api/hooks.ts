@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import { p } from "../constants";
-import type { OutlineInfo, ProjectStatus, ReviewRecord, Thread } from "./types";
+import type { BibleData, OutlineInfo, ProjectStatus, ReviewRecord, Thread } from "./types";
 
 export interface ProjectSummary {
   name: string;
@@ -65,6 +65,14 @@ export function useOutline(name: string) {
   return useQuery({
     queryKey: ["outline", name],
     queryFn: () => api<OutlineInfo>(`${p(name)}/outline`),
+  });
+}
+
+export function useBible(name: string) {
+  return useQuery({
+    queryKey: ["bible", name],
+    queryFn: () => api<BibleData>(`${p(name)}/bible`),
+    enabled: !!name,
   });
 }
 
@@ -170,6 +178,50 @@ export function useCancelJob(name?: string) {
         void qc.invalidateQueries({ queryKey: ["status"] });
       }
       void qc.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+}
+
+export function useSaveBibleSection(name: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { section: string; data: unknown }) =>
+      api<{ ok: boolean }>(`${p(name)}/bible/${vars.section}`, {
+        method: "PUT",
+        body: JSON.stringify(vars.data),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["bible", name] });
+      void qc.invalidateQueries({ queryKey: ["status", name] });
+    },
+  });
+}
+
+export function useBibleChat(name: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { section: string; instruction: string; character_id?: string }) =>
+      api<{ job_id: string }>(`${p(name)}/bible/chat`, {
+        method: "POST",
+        body: JSON.stringify(vars),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["status", name] });
+    },
+  });
+}
+
+export function useOutlineExtend(name: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { n: number }) =>
+      api<{ job_id: string }>(`${p(name)}/outline/extend`, {
+        method: "POST",
+        body: JSON.stringify(vars),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["outline", name] });
+      void qc.invalidateQueries({ queryKey: ["status", name] });
     },
   });
 }
