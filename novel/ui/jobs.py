@@ -2,6 +2,7 @@
 human gates to the GUI, and broadcast progress events per project."""
 from __future__ import annotations
 
+import json
 import threading
 import uuid
 from collections.abc import Callable
@@ -9,7 +10,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Empty, Queue
 
+from pydantic import BaseModel
+
+from novel.models import Character, Concept, Foreshadow, Outline, World
 from novel.render import artifact_text
+from novel.store.bible import StoryBible
 
 
 class JobCancelled(Exception):
@@ -257,6 +262,80 @@ def run_chapters_job(proj_root: Path, n: int) -> Callable[[Job], object]:
             on_event=job.emit,
         )
     return fn
+
+
+BIBLE_SECTIONS = ("concept", "world", "characters", "outline", "foreshadows", "events")
+_READ_ONLY_SECTIONS = ("events",)
+_SECTION_MODELS: dict[str, type[BaseModel]] = {
+    "concept": Concept,
+    "world": World,
+    "outline": Outline,
+}
+
+
+def read_bible_section(bible: StoryBible, section: str) -> object | None:
+    if section == "concept":
+        try:
+            return bible.get_concept()
+        except KeyError:
+            return None
+    if section == "world":
+        return bible.get_world()
+    if section == "characters":
+        return bible.all_characters()
+    if section == "outline":
+        return bible.get_outline()
+    if section == "foreshadows":
+        return bible.list_foreshadow()
+    if section == "events":
+        return bible.list_events()
+    raise ValueError(f"unknown section: {section}")
+
+
+def validate_bible_section(section: str, data: object) -> object:
+    if section in _READ_ONLY_SECTIONS:
+        raise ValueError(f"unknown section: {section}")  # events: append-only, no PUT
+    if section == "characters":
+        assert isinstance(data, list)
+        return [Character.model_validate(c) for c in data]
+    if section == "foreshadows":
+        assert isinstance(data, list)
+        return [Foreshadow.model_validate(f) for f in data]
+    if section in _SECTION_MODELS:
+        return _SECTION_MODELS[section].model_validate(data)
+    raise ValueError(f"unknown section: {section}")
+
+
+def save_bible_section(bible: StoryBible, section: str, artifact: object) -> None:
+    if section == "concept":
+        bible.set_concept(artifact)  # type: ignore[arg-type]
+    elif section == "world":
+        bible.set_world(artifact)  # type: ignore[arg-type]
+    elif section == "characters":
+        d = bible.proj.load_canonical()
+        d["characters"] = [ch.model_dump() for ch in artifact]  # type: ignore[attr-defined]
+        bible.proj.save_canonical(d)
+    elif section == "outline":
+        bible.set_outline(artifact)  # type: ignore[arg-type]
+    elif section == "foreshadows":
+        path = bible.proj.root / "bible" / "foreshadowing.json"
+        items = [f.model_dump() for f in artifact]  # type: ignore[attr-defined]
+        path.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    else:
+        raise ValueError(f"unknown section: {section}")
+
+
+def json_diff(old: object, new: object) -> str:
+    import difflib
+    import json as _json
+
+    def lines(obj: object) -> list[str]:
+        return _json.dumps(obj, ensure_ascii=False, indent=2,
+                           default=lambda o: o.model_dump() if hasattr(o, "model_dump") else str(o)
+                           ).splitlines()
+
+    return "\n".join(difflib.unified_diff(
+        lines(old), lines(new), fromfile="当前", tofile="改写稿", lineterm=""))
 
 
 def drain(q: Queue[dict[str, object]], timeout: float = 0.05) -> list[dict[str, object]]:
