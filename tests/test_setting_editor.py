@@ -44,3 +44,9 @@ def test_run_returns_schema_instance() -> None:
                                      history=[]))
     assert isinstance(out, World)
     assert out.rules == ["ice"]
+
+
+def test_agent_names_include_setting_editor() -> None:
+    from novel.runtime import AGENT_NAMES
+    assert "setting_editor" in AGENT_NAMES
+    assert AGENT_NAMES.count("strategist") == 1  # 既有条目未动

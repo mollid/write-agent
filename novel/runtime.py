@@ -8,7 +8,7 @@ from novel.providers import ModelProvider
 
 AGENT_NAMES = [
     "strategist", "worldbuilder", "character", "outliner", "writer",
-    "continuity", "editor", "scorer", "extractor",
+    "continuity", "editor", "scorer", "extractor", "setting_editor",
 ]
 
 
