@@ -6,7 +6,7 @@ import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import Body, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -38,6 +38,16 @@ class GateReq(BaseModel):
 
 class SetupReq(BaseModel):
     premise: str = ""
+
+
+class BibleChatReq(BaseModel):
+    section: str
+    instruction: str = Field(min_length=1)
+    character_id: str | None = None
+
+
+class ExtendReq(BaseModel):
+    n: int = Field(default=3, ge=1, le=50)
 
 
 def _safe_project(root: Path, name: str) -> Path:
@@ -182,6 +192,73 @@ def create_app(root: Path) -> FastAPI:
                         for k, v in r.scores.items()}}
             for r in recs
         ]
+
+    @app.get("/api/projects/{name}/bible")
+    def get_bible(name: str) -> dict[str, object]:
+        p = _safe_project(root, name)
+        from novel.project import NovelProject
+        from novel.store.bible import StoryBible
+        from novel.ui.jobs import read_bible_section
+
+        def dump(sec: str) -> object:
+            art = read_bible_section(StoryBible(NovelProject(root=p)), sec)
+            if art is None:
+                return None
+            if isinstance(art, list):
+                return [o.model_dump() for o in art]
+            assert isinstance(art, BaseModel)
+            return art.model_dump()
+
+        return {sec: dump(sec) for sec in
+                ("concept", "world", "characters", "outline", "foreshadows", "events")}
+
+    @app.put("/api/projects/{name}/bible/{section}")
+    def put_bible_section(name: str, section: str, body: object = Body(None)) -> dict[str, bool]:
+        p = _safe_project(root, name)
+        from novel.project import NovelProject
+        from novel.store.bible import StoryBible
+        from novel.ui.jobs import save_bible_section, validate_bible_section
+        if section not in ("concept", "world", "characters", "outline", "foreshadows"):
+            raise HTTPException(status_code=400, detail=f"未知设定段: {section}")
+        if manager.active_job(name) is not None:
+            raise HTTPException(status_code=409, detail="该项目有任务运行中，稍后再试")
+        try:
+            artifact = validate_bible_section(section, body)
+        except AssertionError as e:
+            raise HTTPException(status_code=422, detail=f"结构错误: {e}") from e
+        except Exception as e:  # pydantic ValidationError
+            raise HTTPException(status_code=422, detail=str(e)) from e
+        save_bible_section(StoryBible(NovelProject(root=p)), section, artifact)
+        return {"ok": True}
+
+    @app.post("/api/projects/{name}/bible/chat", status_code=202)
+    def start_bible_chat(name: str, req: BibleChatReq) -> dict[str, str]:
+        p = _safe_project(root, name)
+        if req.section not in ("concept", "world", "characters", "foreshadows"):
+            raise HTTPException(status_code=422, detail=f"该设定段不支持对话改写: {req.section}")
+        instruction = req.instruction.strip()
+        if not instruction:
+            raise HTTPException(status_code=422, detail="指令不能为空")
+        try:
+            job = manager.start(name, "bible-chat",
+                                jobs.run_bible_chat_job(p, req.section, instruction,
+                                                        req.character_id))
+        except RuntimeError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+        return {"job_id": job.id}
+
+    @app.post("/api/projects/{name}/outline/extend", status_code=202)
+    def start_outline_extend(name: str, req: ExtendReq) -> dict[str, str]:
+        p = _safe_project(root, name)
+        from novel.project import NovelProject
+        from novel.store.bible import StoryBible
+        if StoryBible(NovelProject(root=p)).get_outline() is None:
+            raise HTTPException(status_code=422, detail="尚无大纲，无法追章")
+        try:
+            job = manager.start(name, "bible-extend", jobs.run_outline_extend_job(p, req.n))
+        except RuntimeError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+        return {"job_id": job.id}
 
     @app.post("/api/projects/{name}/export")
     def do_export(name: str) -> dict[str, str]:

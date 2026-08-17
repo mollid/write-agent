@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from novel.models import Concept, World
 from novel.project import NovelProject
 from novel.store.bible import StoryBible
 from novel.ui import jobs as J
+from novel.ui.app import create_app
 from novel.ui.jobs import (
     json_diff,
     read_bible_section,
@@ -131,3 +134,135 @@ def test_extend_job_demo_appends_and_unlocks(bible, monkeypatch, tmp_path):
     # no chapters on disk yet; write one complete to prove unlock
     (bible.proj.root / "chapters" / "001.md").write_text("x" * 80, encoding="utf-8")
     assert next_start_chapter(bible.proj, ReviewStore(bible.proj)) == 2
+
+
+# ---------- HTTP endpoints ----------
+
+
+@pytest.fixture()
+def client(tmp_path):
+    return TestClient(create_app(tmp_path))
+
+
+def _seed(client):
+    client.post("/api/projects", json={"name": "po"})
+    client.put("/api/projects/po/bible/concept", json={
+        "logline": "L", "genre": "g", "tone": "t", "target_length_words": 100, "audience": "a"})
+
+
+def _seed_full(client):
+    _seed(client)
+    client.put("/api/projects/po/bible/world", json={"setting": "city"})
+    client.put("/api/projects/po/bible/characters", json=[
+        {"id": "c1", "slug": "ara", "name": "Ara", "role": "protagonist",
+         "backstory": "b", "motivation": "m", "arc": "a"}])
+    client.put("/api/projects/po/bible/outline", json={
+        "arcs": [{"arc_name": "A", "chapters": [
+            {"chapter_no": 1, "chapter_title": "T1", "beats": [
+                {"pov": "c1", "setting": "tavern", "event": "e",
+                 "emotional_turn": "d", "characters": ["c1"]}]}]}]})
+
+
+def test_get_bible_full_shape(client):
+    client.post("/api/projects", json={"name": "po"})
+    r = client.get("/api/projects/po/bible")
+    assert r.status_code == 200
+    data = r.json()
+    assert set(data) == {"concept", "world", "characters", "outline", "foreshadows", "events"}
+    assert data["concept"] is None and data["events"] == []
+
+
+def test_put_section_validates_and_persists(client):
+    _seed(client)
+    assert client.get("/api/projects/po/bible").json()["concept"]["logline"] == "L"
+    bad = client.put("/api/projects/po/bible/concept", json={"logline": "x"})
+    assert bad.status_code == 422
+    ro = client.put("/api/projects/po/bible/events", json=[])
+    assert ro.status_code == 400
+    unk = client.put("/api/projects/po/bible/nope", json={})
+    assert unk.status_code == 400
+
+
+def _wait_job_like(client, job_id, timeout=10.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        data = client.get(f"/api/jobs/{job_id}").json()
+        if data["gates"] or data["status"] != "running":
+            return data
+        time.sleep(0.05)
+    raise AssertionError("gate never appeared")
+
+
+def _poll_done(client, job_id, timeout=10.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        data = client.get(f"/api/jobs/{job_id}").json()
+        if data["status"] != "running":
+            return data["status"]
+        time.sleep(0.05)
+    raise AssertionError("job did not finish in time")
+
+
+def test_chat_and_extend_endpoints_202(client):
+    _seed(client)
+    r = client.post("/api/projects/po/bible/chat",
+                    json={"section": "concept", "instruction": "更黑暗"})
+    assert r.status_code == 202 and "job_id" in r.json()
+    job_id = r.json()["job_id"]
+    # demo mode: no auto-approve — the job blocks on its gate
+    data = _wait_job_like(client, job_id)
+    assert client.post(f"/api/gates/{data['gates'][0]['id']}",
+                       json={"approve": True}).status_code == 200
+    assert _poll_done(client, job_id) == "done"
+
+    _seed_full(client)
+    r2 = client.post("/api/projects/po/outline/extend", json={"n": 2})
+    assert r2.status_code == 202 and "job_id" in r2.json()
+    j2 = r2.json()["job_id"]
+    data2 = _wait_job_like(client, j2)
+    assert data2["gates"][0]["label"] == "bible:outline_extend"
+    assert client.post(f"/api/gates/{data2['gates'][0]['id']}",
+                       json={"approve": True}).status_code == 200
+    assert _poll_done(client, j2) == "done"
+    outline = client.get("/api/projects/po/bible").json()["outline"]
+    nums = [c["chapter_no"] for a in outline["arcs"] for c in a["chapters"]]
+    assert nums == [1, 2, 3]
+
+
+def test_chat_endpoint_gate_flow(client):
+    _seed(client)
+    job_id = client.post("/api/projects/po/bible/chat",
+                         json={"section": "concept", "instruction": "更黑暗"}).json()["job_id"]
+    data = _wait_job_like(client, job_id)
+    assert data["gates"][0]["label"] == "bible:concept"
+    assert client.post(f"/api/gates/{data['gates'][0]['id']}",
+                       json={"approve": True}).status_code == 200
+    status = _poll_done(client, job_id)
+    assert status == "done"
+    # demo echo: content unchanged, still applied
+    assert client.get("/api/projects/po/bible").json()["concept"]["logline"] == "L"
+
+
+def test_chat_rejects_bad_section_and_empty_instruction(client):
+    _seed(client)
+    assert client.post("/api/projects/po/bible/chat",
+                       json={"section": "nope", "instruction": "x"}).status_code == 422
+    assert client.post("/api/projects/po/bible/chat",
+                       json={"section": "concept", "instruction": " "}).status_code == 422
+
+
+def test_extend_requires_outline(client):
+    client.post("/api/projects", json={"name": "po"})
+    r = client.post("/api/projects/po/outline/extend", json={"n": 2})
+    assert r.status_code == 422
+
+
+def test_put_conflicts_with_active_job(client):
+    _seed(client)
+    job_id = client.post("/api/projects/po/bible/chat",
+                         json={"section": "concept", "instruction": "改"}).json()["job_id"]
+    _wait_job_like(client, job_id)  # job now parked on its gate
+    r = client.put("/api/projects/po/bible/concept", json={
+        "logline": "L2", "genre": "g", "tone": "t", "target_length_words": 1, "audience": "a"})
+    assert r.status_code == 409
+    assert client.get(f"/api/jobs/{job_id}").json()["gates"]  # still parked
