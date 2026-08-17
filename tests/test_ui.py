@@ -299,7 +299,7 @@ def test_outline_endpoint(client: TestClient) -> None:
     assert _wait_job(client, r.json()["job_id"])["status"] == "done"
     outline = client.get("/api/projects/po/outline").json()
     titles = [c["chapter_title"] for arc in outline["arcs"] for c in arc["chapters"]]
-    assert titles == ["T1", "T2", "T3"][: len(titles)] and len(titles) == 3
+    assert titles == [f"T{i}" for i in range(1, 7)][: len(titles)] and len(titles) == 6
     assert set(outline["arcs"][0]["chapters"][0]) == {"chapter_no", "chapter_title"}
     assert client.get("/api/projects/nope/outline").status_code == 404
 

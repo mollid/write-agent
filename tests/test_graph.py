@@ -213,3 +213,91 @@ def test_foreshadow_ledger_registered_on_setup(tmp_path):
     assert fs[0].status == ForeshadowStatus.OPEN
     assert fs[0].planted_ch == 3
     assert fs[0].description == "the cracked bell"
+
+
+class _RecordingWriterProvider(FakeProvider):
+    """FakeProvider that records the assembled context handed to the writer."""
+
+    def __init__(self, responses: dict[str, object]) -> None:
+        super().__init__(responses, tag_key="agent")
+        self.writer_contexts: list[str] = []
+
+    def complete(self, messages: list[dict[str, object]], cfg: ModelConfig,
+                 *, seed: int | None = None) -> str:
+        if any(m.get("agent") == "writer" for m in messages):
+            self.writer_contexts.append(str(messages[-1]["content"]))
+        return super().complete(messages, cfg, seed=seed)
+
+
+def _resume_setup(tmp_path):
+    proj, bible, vector, concept, _beat, _outline, chars = _one_chapter_setup(tmp_path)
+    # 3-chapter outline with a distinct, identifiable beat per chapter
+    outline = Outline(arcs=[Arc(arc_name="A", chapters=[
+        ChapterOutline(
+            chapter_no=i, chapter_title=f"T{i}",
+            beats=[ChapterBeat(pov="Ara", setting=f"s{i}", event=f"event-{i}",
+                               emotional_turn="doubt", characters=["c1"], plants=[f"seed-{i}"])])
+        for i in (1, 2, 3)])])
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
+    provider = _RecordingWriterProvider(responses={
+        "strategist": concept,
+        "worldbuilder": World(setting="city"),
+        "character": chars,
+        "outliner": outline,
+        "writer": "Chapter prose text.",
+        "continuity": "[]",
+        "editor": "Chapter prose text.",
+        "scorer": passing,
+        "extractor": {"character_states": {}, "voice_samples": {}, "mannerisms_used": {},
+                      "key_events": [], "threads_advanced": [],
+                      "new_information_revealed": []},
+    })
+    return proj, bible, vector, provider
+
+
+def test_resume_uses_next_outline_chapter_not_first(tmp_path):
+    """Regression: write-chapter after existing chapters must continue the outline.
+
+    Previously the generation loop always started from the FIRST outline chapter
+    while numbering files from start_chapter, so `write-chapter 2` with 001.md
+    present rewrote chapter 1's beat into 002.md (story restarted from the top).
+    """
+    proj, bible, vector, provider = _resume_setup(tmp_path)
+    # run 1: chapter 1 (fresh project, runs SETUP)
+    state1 = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                               proj=proj, premise="a thief", target_chapters=1)
+    assert state1.error is None
+    assert "event=event-1" in provider.writer_contexts[0]
+    assert state1.written == [1]
+
+    # run 2: chapters 2-3 (resume)
+    provider.writer_contexts.clear()
+    state2 = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                               proj=proj, premise="", target_chapters=3, start_chapter=2)
+    assert state2.error is None
+    assert (proj.root / "chapters" / "002.md").exists()
+    assert (proj.root / "chapters" / "003.md").exists()
+    # chapter 2 written from outline chapter 2's beat; chapter 3 from chapter 3's
+    assert "event=event-2" in provider.writer_contexts[0]
+    assert "event=event-3" in provider.writer_contexts[1]
+    assert state2.written == [2, 3]
+    # plants registered under the correct chapter numbers
+    fs2 = next(f for f in bible.list_foreshadow() if f.id == "plant-seed-2")
+    fs3 = next(f for f in bible.list_foreshadow() if f.id == "plant-seed-3")
+    assert fs2.planted_ch == 2
+    assert fs3.planted_ch == 3
+
+
+def test_resume_beyond_outline_reports_exhaustion(tmp_path):
+    proj, bible, vector, provider = _resume_setup(tmp_path)
+    state1 = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                               proj=proj, premise="a thief", target_chapters=3)
+    assert state1.error is None
+    assert state1.written == [1, 2, 3]
+    # outline only has 3 chapters: asking for chapter 4 must not restart beats
+    state2 = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                               proj=proj, premise="", target_chapters=5, start_chapter=4)
+    assert state2.error is not None and "exhausted" in state2.error
+    assert state2.written == []
+    assert not (proj.root / "chapters" / "004.md").exists()

@@ -128,14 +128,16 @@ def write_chapter(n: int = typer.Argument(1, help="number of chapters to write")
     if start_chapter > 1:
         console.print(f"[cyan]Resuming from chapter {start_chapter}"
                       f" ({start_chapter - 1} chapter(s) already complete)[/cyan]")
-    run_full_pipeline(provider=provider, cfg_map=cfg_map, bible=bible, vector=vector,
-                      proj=proj, premise=(c.logline if (c := bible.get_concept()) else ""),
-                      target_chapters=start_chapter - 1 + n, start_chapter=start_chapter,
-                      score_min=cfg.thresholds.score_min, max_retries=cfg.thresholds.max_retries,
-                      token_budget=cfg.generation.context_token_budget,
-                      min_chapter_chars=min_chars,
-                      on_gate=_gate if is_live_mode() else None)
-    console.print(f"[green]Wrote {n} chapter(s).[/green]")
+    state = run_full_pipeline(provider=provider, cfg_map=cfg_map, bible=bible, vector=vector,
+                              proj=proj, premise=(c.logline if (c := bible.get_concept()) else ""),
+                              target_chapters=start_chapter - 1 + n, start_chapter=start_chapter,
+                              score_min=cfg.thresholds.score_min, max_retries=cfg.thresholds.max_retries,
+                              token_budget=cfg.generation.context_token_budget,
+                              min_chapter_chars=min_chars,
+                              on_gate=_gate if is_live_mode() else None)
+    if state.error:
+        console.print(f"[yellow]Warning:[/yellow] {state.error}")
+    console.print(f"[green]Wrote {len(state.written)} chapter(s).[/green]")
 
 
 @app.command()

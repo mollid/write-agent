@@ -30,6 +30,7 @@ class PipelineState:
     last_review: ReviewScore | None = None
     human_overrides: dict[str, object] = field(default_factory=dict)
     error: str | None = None
+    written: list[int] = field(default_factory=list)
 
 
 def _scored(producer_out: str, artifact_type: str, artifact_json: str, scorer: ScorerAgent,
@@ -71,14 +72,12 @@ def run_full_pipeline(
         assert outline is not None
         if on_gate:
             on_gate("outline", outline)
-        chapter_no = 0
     else:
         # --- RESUME: skip SETUP, load persisted bible state ---
         outline = bible.get_outline()
         assert outline is not None, "no outline to resume from"
         saved_concept = bible.get_concept()
         premise = premise or (saved_concept.logline if saved_concept else "")
-        chapter_no = start_chapter - 1
         emit({"type": "stage", "stage": "resume", "chapter": start_chapter})
 
     scorer = ScorerAgent(provider, agent("scorer"))
@@ -88,12 +87,25 @@ def run_full_pipeline(
     for stale in (proj.root / "chapters").glob(".*.md.tmp"):
         stale.unlink()
 
+    total_outline = sum(len(a.chapters) for a in outline.arcs)
+    if start_chapter > total_outline:
+        state.error = (f"outline exhausted: {total_outline} chapters in outline, "
+                       f"nothing to write from chapter {start_chapter}")
+        return state
+
     # --- GENERATION ---
+    # Flatten outline chapters by position (1..N). Position == global chapter number:
+    # chapter k on disk must be written from the k-th outline chapter. On resume,
+    # skip positions < start_chapter instead of restarting the outline from the top.
+    outline_pos = 0
     for arc in outline.arcs:
         for ch_out in arc.chapters:
-            chapter_no += 1
-            if chapter_no > target_chapters:
+            outline_pos += 1
+            if outline_pos > target_chapters:
                 break
+            if outline_pos < start_chapter:
+                continue
+            chapter_no = outline_pos
             if is_chapter_complete(proj, reviews, chapter_no, min_chapter_chars):
                 emit({"type": "chapter_skipped", "chapter": chapter_no,
                       "reason": "already complete"})
@@ -204,7 +216,12 @@ def run_full_pipeline(
             tmp.write_text(prose, encoding="utf-8")
             tmp.replace(chapters_dir / f"{chapter_no:03d}.md")
             emit({"type": "chapter_done", "chapter": chapter_no})
+            state.written.append(chapter_no)
             if on_gate:
                 on_gate("chapter", chapter_no)
+    if not state.error and target_chapters > total_outline:
+        state.error = (f"outline exhausted: outline has {total_outline} chapters, "
+                       f"requested through chapter {target_chapters} "
+                       f"(wrote {len(state.written)} this run)")
     emit({"type": "done"})
     return state

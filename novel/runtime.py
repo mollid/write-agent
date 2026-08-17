@@ -41,7 +41,7 @@ def demo_provider() -> ModelProvider:
     beat = ChapterBeat(pov="Ara", setting="tavern", event="meet informant", emotional_turn="doubt",
                        characters=["c1"])
     outline = Outline(arcs=[Arc(arc_name="A", chapters=[
-        ChapterOutline(chapter_no=i, chapter_title=f"T{i}", beats=[beat]) for i in range(1, 4)])],
+        ChapterOutline(chapter_no=i, chapter_title=f"T{i}", beats=[beat]) for i in range(1, 7)])],
         foreshadow_ledger=[])
     chars = [Character(id="c1", slug="ara", name="Ara", role="protagonist",
                        backstory="orphan", motivation="revenge", arc="a")]

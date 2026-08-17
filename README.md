@@ -480,3 +480,5 @@ uv run novel write-chapter 1 --project ./my-novel
 - `.meta/reviews/reviews.jsonl` 中是否有该章的 `passed` 记录；评分留档功能之前的旧项目没有该文件，此时只按文件长度判定。
 
 另外，续写仅识别 `chapters/` 下命名为 `001.md`、`002.md` 这类三位数字的章节文件。不要手动修改章节编号格式；需要重新开始时，请创建新项目目录。
+
+续写会严格按大纲章节顺序对位：第 N 个章节文件由大纲第 N 章的节拍生成。若请求的章节数超过大纲已有的章节数，命令会给出 `outline exhausted` 警告并只写出实际可写的章节。

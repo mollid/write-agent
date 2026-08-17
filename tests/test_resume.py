@@ -95,9 +95,13 @@ def test_torn_trailing_line_in_reviews_jsonl(tmp_path):
     assert next_start_chapter(proj, reviews) == 2
 
 
-def _run_pipeline(tmp_path, prose: str, target: int, start: int = 1,
-                  proj: NovelProject | None = None):
-    """Demo-mode pipeline run with FakeProvider; pass `proj` back in to rerun."""
+def _run_pipeline(tmp_path, prose: str, target: int, start: int = 1, proj=None,
+                  outline_len: int | None = None):
+    """Demo-mode pipeline run with FakeProvider; pass `proj` back in to rerun.
+
+    `outline_len` sizes the outline independently of `target` so a first run can
+    persist a longer outline than it writes (mirrors extending an outline before
+    resuming)."""
     from novel.graph import run_full_pipeline
     from novel.models import (
         Arc,
@@ -124,7 +128,7 @@ def _run_pipeline(tmp_path, prose: str, target: int, start: int = 1,
                        emotional_turn="doubt", characters=["c1"])
     outline = Outline(arcs=[Arc(arc_name="A", chapters=[
         ChapterOutline(chapter_no=i, chapter_title=f"T{i}", beats=[beat])
-        for i in range(1, target + 1)])])
+        for i in range(1, (outline_len or target) + 1)])])
     chars = [Character(id="c1", slug="ara", name="Ara", role="protagonist",
                        backstory="b", motivation="m", arc="a")]
     passing = ReviewScore(artifact_type="chapter", overall=90,
@@ -153,7 +157,9 @@ def test_atomic_write_no_tmp_residue(tmp_path):
 
 
 def test_stale_tmp_cleaned_on_rerun(tmp_path):
-    proj, state = _run_pipeline(tmp_path, LONG, target=1)
+    # first run writes chapter 1 but persists a 2-chapter outline (as if the
+    # outline had been extended), so the rerun can legally write chapter 2
+    proj, state = _run_pipeline(tmp_path, LONG, target=1, outline_len=2)
     assert state.error is None
     # a crashed run left a partial tmp behind; the next pipeline start must remove it
     (proj.root / "chapters" / ".002.md.tmp").write_text("partial", encoding="utf-8")
