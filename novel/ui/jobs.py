@@ -264,6 +264,117 @@ def run_chapters_job(proj_root: Path, n: int) -> Callable[[Job], object]:
     return fn
 
 
+def run_bible_chat_job(proj_root: Path, section: str, instruction: str,
+                       character_id: str | None = None) -> Callable[[Job], object]:
+    from novel.agents.setting_editor import SettingEditInput, SettingEditorAgent
+    from novel.config import load_config
+    from novel.models import Character as _Char
+    from novel.project import NovelProject
+    from novel.runtime import is_live_mode, make_provider
+    from novel.store.bible import StoryBible
+
+    def fn(job: Job) -> object:
+        proj = NovelProject(root=proj_root)
+        cfg = load_config(proj.config_path)
+        bible = StoryBible(proj)
+        target_id = character_id  # single-character scoping
+        schema = _Char if target_id else _SECTION_MODELS[section]
+
+        def current_artifact() -> object:
+            if target_id:
+                ch = bible.get_character(target_id)
+                assert ch is not None, f"no character {target_id}"
+                return ch
+            art = read_bible_section(bible, section)
+            assert art is not None, f"section {section} is empty"
+            return art
+
+        cur_instruction = instruction
+        history: list[tuple[str, str]] = []
+        for _round in range(3):
+            current = current_artifact()
+            current_json = current.model_dump_json()  # type: ignore[attr-defined]
+            if is_live_mode():
+                provider = make_provider(cfg)
+                draft = SettingEditorAgent(provider, cfg.model_for("setting_editor"),
+                                           schema).run(SettingEditInput(
+                    current_json=current_json, instruction=cur_instruction, history=history))
+            else:
+                draft = schema.model_validate_json(current_json)  # demo: echo
+            diff = json_diff(current.model_dump(), draft.model_dump())  # type: ignore[attr-defined]
+            job.emit({"type": "bible_proposal", "section": section,
+                      "diff": diff, "draft": draft.model_dump()})
+            approved, fb = job.gate_with_feedback(f"bible:{section}", draft)
+            if approved:
+                if target_id:
+                    bible.upsert_character(draft)  # type: ignore[arg-type]
+                else:
+                    save_bible_section(bible, section, draft)
+                job.emit({"type": "bible_applied", "section": section})
+                job.emit({"type": "bible_chat_done", "section": section, "applied": True})
+                return None
+            if not fb:
+                job.emit({"type": "bible_chat_done", "section": section, "applied": False})
+                return None
+            history.append((cur_instruction, "rejected"))
+            cur_instruction = fb
+        job.emit({"type": "bible_chat_done", "section": section, "applied": False})
+        return None
+    return fn
+
+
+def run_outline_extend_job(proj_root: Path, n: int) -> Callable[[Job], object]:
+    from novel.agents.outliner import OutlineExtendInput, OutlinerExtendAgent
+    from novel.config import load_config
+    from novel.models import Arc, ChapterBeat, ChapterOutline, ForeshadowStatus
+    from novel.project import NovelProject
+    from novel.runtime import is_live_mode, make_provider
+    from novel.setup_flow import merge_foreshadow_ledger
+    from novel.store.bible import StoryBible
+
+    def fn(job: Job) -> object:
+        proj = NovelProject(root=proj_root)
+        cfg = load_config(proj.config_path)
+        bible = StoryBible(proj)
+        concept = bible.get_concept()
+        world = bible.get_world()
+        roster = bible.all_characters()
+        existing = bible.get_outline()
+        assert concept is not None and world is not None, "concept+world required"
+        assert existing is not None, "outline is empty"
+        if is_live_mode():
+            provider = make_provider(cfg)
+            draft = OutlinerExtendAgent(provider, cfg.model_for("outliner")).run(
+                OutlineExtendInput(concept=concept, world=world, characters=roster,
+                                   current=existing, recent_events=bible.list_events(),
+                                   open_foreshadows=[f for f in bible.list_foreshadow()
+                                                      if f.status == ForeshadowStatus.OPEN],
+                                   n_chapters=n))
+        else:
+            existing_max = max((c.chapter_no for a in existing.arcs for c in a.chapters),
+                               default=0)
+            first = roster[0].id
+            beat = ChapterBeat(pov=first, setting="demo", event="demo extension",
+                               emotional_turn="steady", characters=[first])
+            draft = Outline(arcs=[Arc(arc_name="Extension",
+                chapters=[ChapterOutline(chapter_no=existing_max + k,
+                                         chapter_title=f"T{existing_max + k}",
+                                         beats=[beat]) for k in range(1, n + 1)])])
+        diff = json_diff(existing.model_dump(), draft.model_dump())
+        job.emit({"type": "outline_extend_proposal", "added": n, "diff": diff})
+        approved, _fb = job.gate_with_feedback("bible:outline_extend", draft)
+        if not approved:
+            return None
+        for arc in draft.arcs:          # draft = agent 输出的纯新增章
+            existing.arcs.append(arc)   # 追加弧（agent prompt 已保证编号续接）
+        existing.foreshadow_ledger.extend(draft.foreshadow_ledger)
+        bible.set_outline(existing)
+        merge_foreshadow_ledger(existing, bible)
+        job.emit({"type": "outline_extended", "added": n})
+        return None
+    return fn
+
+
 BIBLE_SECTIONS = ("concept", "world", "characters", "outline", "foreshadows", "events")
 _READ_ONLY_SECTIONS = ("events",)
 _SECTION_MODELS: dict[str, type[BaseModel]] = {

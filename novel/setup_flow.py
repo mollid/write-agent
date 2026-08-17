@@ -65,6 +65,15 @@ def generate_stage(stage: str, *, provider: ModelProvider, cfg_map: dict[str, Mo
     raise ValueError(f"unknown setup stage: {stage}")
 
 
+def merge_foreshadow_ledger(outline: Outline, bible: StoryBible) -> None:
+    """Merge an outline's ledger entries into the bible's foreshadow list (idempotent)."""
+    for entry in outline.foreshadow_ledger:
+        if not any(f.id == entry.id for f in bible.list_foreshadow()):
+            bible.add_foreshadow(Foreshadow(
+                id=entry.id, description=entry.description,
+                planted_ch=_parse_ch(entry.planted_in), status=ForeshadowStatus.OPEN))
+
+
 def approve_stage(stage: str, artifact: object, bible: StoryBible) -> None:
     """Persist an approved artifact into the story bible."""
     if stage == "concept":
@@ -81,10 +90,6 @@ def approve_stage(stage: str, artifact: object, bible: StoryBible) -> None:
     elif stage == "outline":
         assert isinstance(artifact, Outline)
         bible.set_outline(artifact)
-        for entry in artifact.foreshadow_ledger:
-            if not any(f.id == entry.id for f in bible.list_foreshadow()):
-                bible.add_foreshadow(Foreshadow(
-                    id=entry.id, description=entry.description,
-                    planted_ch=_parse_ch(entry.planted_in), status=ForeshadowStatus.OPEN))
+        merge_foreshadow_ledger(artifact, bible)
     else:
         raise ValueError(f"unknown setup stage: {stage}")
