@@ -1015,7 +1015,7 @@ Expected: 新增 FAIL（404 on /bible）
             raise HTTPException(status_code=422, detail=str(e)) from e
         save_bible_section(StoryBible(NovelProject(root=p)), section, artifact)
         return {"ok": True}
-    ```
+```
 
 （body 参数类型用 `object` + 手工校验即可通过 mypy；pydantic ValidationError 捕获写 `except Exception` 时注释标注。`characters`/`foreshadows` 的 list 断言失败也要 422——`validate_bible_section` 内 `assert isinstance(data, list)` 抛 AssertionError，上面已转 422。）
 
