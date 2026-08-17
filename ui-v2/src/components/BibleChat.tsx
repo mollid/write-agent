@@ -8,7 +8,8 @@ import DiffView from "./DiffView";
  * via POST /bible/chat, shows the pending entry (生成中), renders the SSE
  * proposal as a DiffView with 应用/放弃 (gate resolve, no feedback box —
  * re-instruct after discarding instead), and flips the history entry on
- * `bible_chat_done`. outline/events are read-only sections. */
+ * `bible_chat_done`. outline/events/foreshadows are read-only sections;
+ * characters requires selecting a character first. */
 
 interface ChatEntry {
   instruction: string;
@@ -18,6 +19,7 @@ interface ChatEntry {
 const READONLY_NOTES: Record<string, string> = {
   outline: "大纲请使用追章（在「大纲」卡片追加章节），此处为只读展示",
   events: "事件由系统自动记录（写作时由系统回写），此处为只读展示",
+  foreshadows: "伏笔暂不支持对话改写，请使用编辑 JSON",
 };
 
 const STATUS_TAGS: Record<ChatEntry["status"], { text: string; color: string }> = {
@@ -29,6 +31,7 @@ const STATUS_TAGS: Record<ChatEntry["status"], { text: string; color: string }> 
 export default function BibleChat({ name, section }: { name: string; section: string }) {
   const proposal = useEvents((s) => s.bibleProposal);
   const bibleChatDone = useEvents((s) => s.bibleChatDone);
+  const lastEndSeq = useEvents((s) => s.lastEnd?.seq ?? null);
   const chat = useBibleChat(name);
   const resolve = useResolveGate(name);
   const { data: bible } = useBible(name);
@@ -54,6 +57,16 @@ export default function BibleChat({ name, section }: { name: string; section: st
     });
   }, [doneSeq]);
 
+  // a job that dies before gate resolution never emits bible_chat_done —
+  // sweep any remaining pending entries when its job_end lands.
+  useEffect(() => {
+    if (lastEndSeq === null) return;
+    setHistory((h) => {
+      if (!h.some((e) => e.status === "pending")) return h;
+      return h.map((e) => (e.status === "pending" ? { ...e, status: "discarded" } : e));
+    });
+  }, [lastEndSeq]);
+
   if (readonlyNote) {
     return (
       <Typography.Paragraph type="secondary" data-testid="chat-readonly-note">
@@ -74,7 +87,7 @@ export default function BibleChat({ name, section }: { name: string; section: st
       setHistory((h) => [...h, { instruction, status: "pending" }]);
       setText("");
     } catch (e) {
-      message.error(String(e));
+      message.error(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -83,11 +96,12 @@ export default function BibleChat({ name, section }: { name: string; section: st
     try {
       await resolve.mutateAsync({ id: active.gateId, approve });
     } catch (e) {
-      message.error(String(e));
+      message.error(e instanceof Error ? e.message : String(e));
     }
   }
 
-  const sendDisabled = !!active || chat.isPending || !text.trim();
+  const needCharacter = section === "characters" && !characterId;
+  const sendDisabled = !!active || chat.isPending || !text.trim() || needCharacter;
 
   return (
     <div>
@@ -95,7 +109,7 @@ export default function BibleChat({ name, section }: { name: string; section: st
         <Select
           data-testid="chat-character-select"
           allowClear
-          placeholder="选择人物（可选，不选则改全部）"
+          placeholder="请选择人物"
           style={{ width: "100%", marginBottom: 8 }}
           value={characterId}
           onChange={(v) => setCharacterId(v)}
@@ -107,7 +121,9 @@ export default function BibleChat({ name, section }: { name: string; section: st
         rows={3}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder="用一句话描述想改什么，例如「让世界观更冷酷」…"
+        placeholder={
+          needCharacter ? "请先选择人物" : "用一句话描述想改什么，例如「让世界观更冷酷」…"
+        }
       />
       <Button
         type="primary"

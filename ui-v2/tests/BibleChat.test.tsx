@@ -136,6 +136,16 @@ test("BibleChat: outline/events sections render a read-only note instead of the 
   expect(screen.queryByTestId("chat-input")).not.toBeInTheDocument();
 });
 
+test("BibleChat: foreshadows section renders a read-only note (edit JSON instead)", async () => {
+  stubFetch();
+  renderPanel(<BibleChat name="x" section="foreshadows" />);
+  expect(screen.getByTestId("chat-readonly-note")).toHaveTextContent(
+    "伏笔暂不支持对话改写，请使用编辑 JSON",
+  );
+  expect(screen.queryByTestId("chat-input")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("chat-send")).not.toBeInTheDocument();
+});
+
 // ---------- BibleChat: send flow ----------
 
 test("BibleChat: send posts {section, instruction} and records a pending history entry", async () => {
@@ -176,6 +186,37 @@ test("BibleChat: characters section renders the character select and sends chara
       character_id: "c1",
     }),
   );
+});
+
+test("BibleChat: characters section keeps send disabled until a character is selected", async () => {
+  stubFetch();
+  renderPanel(<BibleChat name="x" section="characters" />);
+
+  fireEvent.change(inputArea(), { target: { value: "给她加一条伤疤" } });
+  expect(screen.getByTestId("chat-send")).toBeDisabled(); // no character yet
+
+  const select = screen.getByTestId("chat-character-select");
+  fireEvent.mouseDown(select.querySelector(".ant-select-selector")!);
+  fireEvent.click(await screen.findByText("阿岚"));
+  expect(screen.getByTestId("chat-send")).toBeEnabled();
+});
+
+// ---------- BibleChat: pending sweep on job end ----------
+
+test("BibleChat: a pending entry flips to 已放弃 when the job ends without done", async () => {
+  stubFetch();
+  renderPanel(<BibleChat name="x" section="world" />);
+
+  fireEvent.change(inputArea(), { target: { value: "让世界更冷" } });
+  fireEvent.click(screen.getByTestId("chat-send"));
+  expect(await screen.findByText("生成中")).toBeInTheDocument();
+
+  // job dies before any gate resolution — job_end must sweep the pending entry
+  act(() => {
+    useEvents.getState().apply({ type: "job_end", status: "error", error: "boom" });
+  });
+  await waitFor(() => expect(screen.getByText("已放弃")).toBeInTheDocument());
+  expect(screen.queryByText("生成中")).not.toBeInTheDocument();
 });
 
 // ---------- BibleChat: proposal → apply ----------

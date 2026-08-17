@@ -234,11 +234,29 @@ def create_app(root: Path) -> FastAPI:
     @app.post("/api/projects/{name}/bible/chat", status_code=202)
     def start_bible_chat(name: str, req: BibleChatReq) -> dict[str, str]:
         p = _safe_project(root, name)
-        if req.section not in ("concept", "world", "characters", "foreshadows"):
+        if req.section == "foreshadows":
+            raise HTTPException(status_code=422, detail="伏笔暂不支持对话改写，请使用编辑 JSON")
+        if req.section not in ("concept", "world", "characters"):
             raise HTTPException(status_code=422, detail=f"该设定段不支持对话改写: {req.section}")
         instruction = req.instruction.strip()
         if not instruction:
             raise HTTPException(status_code=422, detail="指令不能为空")
+        from novel.project import NovelProject
+        from novel.store.bible import StoryBible
+        bible = StoryBible(NovelProject(root=p))
+        if req.section == "characters":
+            cid = (req.character_id or "").strip()
+            if not cid:
+                raise HTTPException(status_code=422, detail="请先选择人物")
+            if bible.get_character(cid) is None:
+                raise HTTPException(status_code=422, detail=f"人物不存在: {cid}")
+        else:
+            try:
+                art = bible.get_concept() if req.section == "concept" else bible.get_world()
+            except KeyError:
+                art = None
+            if art is None:
+                raise HTTPException(status_code=422, detail="该设定尚未生成，无法对话改写")
         try:
             job = manager.start(name, "bible-chat",
                                 jobs.run_bible_chat_job(p, req.section, instruction,

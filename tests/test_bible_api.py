@@ -251,6 +251,69 @@ def test_chat_rejects_bad_section_and_empty_instruction(client):
                        json={"section": "concept", "instruction": " "}).status_code == 422
 
 
+def test_chat_foreshadows_rejected(client):
+    _seed_full(client)
+    r = client.post("/api/projects/po/bible/chat",
+                    json={"section": "foreshadows", "instruction": "x"})
+    assert r.status_code == 422
+    assert r.json()["detail"] == "伏笔暂不支持对话改写，请使用编辑 JSON"
+
+
+def test_chat_characters_requires_character_id(client):
+    _seed_full(client)
+    r = client.post("/api/projects/po/bible/chat",
+                    json={"section": "characters", "instruction": "x"})
+    assert r.status_code == 422
+    assert r.json()["detail"] == "请先选择人物"
+    r2 = client.post("/api/projects/po/bible/chat",
+                     json={"section": "characters", "instruction": "x",
+                           "character_id": "  "})
+    assert r2.status_code == 422
+    assert r2.json()["detail"] == "请先选择人物"
+
+
+def test_chat_characters_unknown_id_rejected(client):
+    _seed_full(client)
+    r = client.post("/api/projects/po/bible/chat",
+                    json={"section": "characters", "instruction": "x",
+                          "character_id": "nope"})
+    assert r.status_code == 422
+    assert r.json()["detail"] == "人物不存在: nope"
+
+
+def test_chat_missing_section_rejected(client):
+    client.post("/api/projects", json={"name": "po"})  # concept empty too
+    r = client.post("/api/projects/po/bible/chat",
+                    json={"section": "concept", "instruction": "x"})
+    assert r.status_code == 422
+    assert r.json()["detail"] == "该设定尚未生成，无法对话改写"
+    _seed(client)  # concept only, world still missing
+    r2 = client.post("/api/projects/po/bible/chat",
+                     json={"section": "world", "instruction": "x"})
+    assert r2.status_code == 422
+    assert r2.json()["detail"] == "该设定尚未生成，无法对话改写"
+
+
+def test_extend_job_demo_with_empty_roster(bible, monkeypatch):
+    _seed_concept(bible)
+    bible.set_world(World(setting="city"))
+    from novel.models import Arc, ChapterBeat, ChapterOutline, Outline
+    beat = ChapterBeat(pov="c1", setting="tavern", event="e", emotional_turn="d",
+                       characters=["c1"])
+    bible.set_outline(Outline(arcs=[Arc(arc_name="A", chapters=[
+        ChapterOutline(chapter_no=1, chapter_title="T1", beats=[beat])])]))
+    monkeypatch.setattr(J.Job, "gate_with_feedback", lambda self, label, a: (True, None))
+    fn = J.run_outline_extend_job(bible.proj.root, 1)
+    job = J.Job("n", "bible_extend", fn)
+    job._bus = None
+    job.thread = threading.Thread(target=job._run, daemon=True)
+    job.thread.start()
+    job.thread.join(timeout=5)
+    assert job.status == "done"
+    nums = [c.chapter_no for a in bible.get_outline().arcs for c in a.chapters]
+    assert nums == [1, 2]
+
+
 def test_extend_requires_outline(client):
     client.post("/api/projects", json={"name": "po"})
     r = client.post("/api/projects/po/outline/extend", json={"n": 2})

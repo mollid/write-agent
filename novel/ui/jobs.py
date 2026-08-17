@@ -274,6 +274,7 @@ def run_bible_chat_job(proj_root: Path, section: str, instruction: str,
     from novel.store.bible import StoryBible
 
     def fn(job: Job) -> object:
+        assert section in ("concept", "world", "characters"), f"chat unsupported: {section}"
         proj = NovelProject(root=proj_root)
         cfg = load_config(proj.config_path)
         bible = StoryBible(proj)
@@ -353,7 +354,7 @@ def run_outline_extend_job(proj_root: Path, n: int) -> Callable[[Job], object]:
         else:
             existing_max = max((c.chapter_no for a in existing.arcs for c in a.chapters),
                                default=0)
-            first = roster[0].id
+            first = roster[0].id if roster else "c1"
             beat = ChapterBeat(pov=first, setting="demo", event="demo extension",
                                emotional_turn="steady", characters=[first])
             draft = Outline(arcs=[Arc(arc_name="Extension",
