@@ -12,11 +12,19 @@ import Threads from "../src/pages/Threads";
 import Export from "../src/pages/Export";
 import Projects from "../src/pages/Projects";
 import Overview from "../src/pages/Overview";
+import Bible from "../src/pages/Bible";
 import JobStrip from "../src/components/JobStrip";
 import { ArtifactView } from "../src/components/ArtifactView";
 import { Trend, trendPoints } from "../src/components/Trend";
 import { useEvents } from "../src/stores/events";
-import type { ProjectStatus, ReviewRecord } from "../src/api/types";
+import type {
+  BibleData,
+  ConceptData,
+  OutlineFullData,
+  ProjectStatus,
+  ReviewRecord,
+  WorldData,
+} from "../src/api/types";
 
 // ---------- helpers ----------
 
@@ -31,6 +39,15 @@ const baseStatus: ProjectStatus = {
   job: null,
 };
 
+const BIBLE_EMPTY: BibleData = {
+  concept: null,
+  world: null,
+  characters: [],
+  outline: null,
+  foreshadows: [],
+  events: [],
+};
+
 /** Stub fetch for the project page endpoints; `over.status` merges into /status. */
 function stubFetchFor(over: {
   status?: Partial<ProjectStatus>;
@@ -43,6 +60,9 @@ function stubFetchFor(over: {
   threads?: object[];
   chapterContent?: (n: number) => string;
   exportPath?: string;
+  bible?: Partial<BibleData>;
+  putBibleStatus?: number;
+  putBibleDetail?: string;
 } = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -58,6 +78,17 @@ function stubFetchFor(over: {
       return new Response(JSON.stringify(over.reviews ?? []), { status: 200 });
     if (url === "/api/projects/x/threads")
       return new Response(JSON.stringify(over.threads ?? []), { status: 200 });
+    if (url === "/api/projects/x/bible")
+      return new Response(JSON.stringify({ ...BIBLE_EMPTY, ...over.bible }), { status: 200 });
+    const bibleSec = url.match(/^\/api\/projects\/x\/bible\/([a-z]+)$/);
+    if (bibleSec && init?.method === "PUT") {
+      if (over.putBibleStatus && over.putBibleStatus >= 400)
+        return new Response(
+          JSON.stringify({ detail: over.putBibleDetail ?? "validation error" }),
+          { status: over.putBibleStatus },
+        );
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }
     const chMatch = url.match(/^\/api\/projects\/x\/chapters\/(\d+)$/);
     if (chMatch) {
       const n = Number(chMatch[1]);
@@ -74,6 +105,12 @@ function stubFetchFor(over: {
         JSON.stringify({ path: over.exportPath ?? "/tmp/novels/x/export/x.md" }),
         { status: 200 },
       );
+    if (init?.method === "POST" && url === "/api/projects/x/bible/chat")
+      return new Response(JSON.stringify({ job_id: "jc" }), { status: 202 });
+    if (init?.method === "POST" && url === "/api/projects/x/outline/extend")
+      return new Response(JSON.stringify({ job_id: "je" }), { status: 202 });
+    if (init?.method === "POST" && url.startsWith("/api/gates/"))
+      return new Response(JSON.stringify({ resolved: true }), { status: 200 });
     if (init?.method === "POST") {
       if (over.postStatus && over.postStatus >= 400)
         return new Response(
@@ -654,4 +691,138 @@ test("Generate: 409 CTA pulses JobStrip instead of no-op navigate (F2); demo not
   fireEvent.click(screen.getByText("查看运行中任务"));
   expect(useEvents.getState().stripPulse).toBe(1);
   await waitFor(() => expect(document.querySelector(".job-strip-pulse")).not.toBeNull());
+});
+
+// ---------- Bible page (Task 10) ----------
+
+const BIBLE_CONCEPT: ConceptData = {
+  logline: "L",
+  genre: "奇幻",
+  tone: "冷峻",
+  themes: ["失去", "时间"],
+  target_length_words: 9000,
+  audience: "成人读者",
+};
+
+const BIBLE_WORLD: WorldData = {
+  setting: "钟之城",
+  era: "末法之世",
+  rules: ["钟声可以兑换记忆"],
+  power_system: "钟律",
+  factions: [{ name: "守钟会", ideology: "秩序", resources: "钟楼", conflict_with: "偷钟人" }],
+  locations: [{ name: "大钟楼", description: "城市中心", narrative_function: "主线舞台" }],
+  constraints: ["每章至少一口钟出场"],
+};
+
+const BIBLE_OUTLINE: OutlineFullData = {
+  arcs: [
+    {
+      arc_name: "第一卷",
+      chapters: [
+        {
+          chapter_no: 1,
+          chapter_title: "钟声",
+          beats: [
+            {
+              beat_id: "b1",
+              pov: "阿岚",
+              setting: "大钟楼",
+              event: "偷走第一口钟",
+              emotional_turn: "不安",
+              characters: ["c1"],
+              plants: ["fs-1"],
+              payoffs: [],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+  foreshadow_ledger: [],
+};
+
+test("Bible: renders concept card and section nav", async () => {
+  stubFetchFor({ bible: { concept: BIBLE_CONCEPT } });
+  renderPage(<Bible />, "/p/:name/bible");
+
+  expect(screen.getByTestId("page-bible")).toBeInTheDocument();
+  expect(await screen.findByText("L")).toBeInTheDocument();
+  expect(screen.getByText("世界观")).toBeInTheDocument();
+  expect(screen.getByTestId("edit-json")).toBeInTheDocument();
+});
+
+test("Bible: edit JSON persists via PUT (已保存) and surfaces 422 detail", async () => {
+  const ok = stubFetchFor({ bible: { concept: BIBLE_CONCEPT } });
+  const first = renderPage(<Bible />, "/p/:name/bible");
+
+  fireEvent.click(await screen.findByTestId("edit-json"));
+  const wrap = screen.getByTestId("edit-json-text");
+  const ta = (
+    wrap.tagName === "TEXTAREA" ? wrap : wrap.querySelector("textarea")!
+  ) as HTMLTextAreaElement;
+  fireEvent.change(ta, {
+    target: { value: JSON.stringify({ ...BIBLE_CONCEPT, logline: "L2" }, null, 2) },
+  });
+  // antd inserts a space between the two Chinese chars of a button label (保 存)
+  fireEvent.click(screen.getByRole("button", { name: "保 存" }));
+  expect(await screen.findByText("已保存")).toBeInTheDocument();
+  const put = ok.mock.calls.find(
+    ([u, i]) => String(u) === "/api/projects/x/bible/concept" && i?.method === "PUT",
+  );
+  expect(put).toBeTruthy();
+  expect(JSON.parse(String(put![1]!.body))).toEqual({ ...BIBLE_CONCEPT, logline: "L2" });
+  first.unmount();
+
+  stubFetchFor({
+    bible: { concept: BIBLE_CONCEPT },
+    putBibleStatus: 422,
+    putBibleDetail: "validation error",
+  });
+  renderPage(<Bible />, "/p/:name/bible");
+  fireEvent.click(await screen.findByTestId("edit-json"));
+  fireEvent.click(screen.getByRole("button", { name: "保 存" }));
+  expect(await screen.findByText("validation error")).toBeInTheDocument();
+});
+
+test("Bible: outline extend posts {n}; proposal renders diff; apply resolves gate", async () => {
+  const fetchMock = stubFetchFor({ bible: { outline: BIBLE_OUTLINE } });
+  renderPage(<Bible />, "/p/:name/bible");
+
+  fireEvent.click(screen.getByText("大纲"));
+  fireEvent.change(await screen.findByRole("spinbutton"), { target: { value: "5" } });
+  fireEvent.click(screen.getByTestId("extend-outline"));
+  await waitFor(() => {
+    const call = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/outline/extend"));
+    expect(call).toBeTruthy();
+    expect(JSON.parse(String((call![1] as RequestInit).body))).toEqual({ n: 5 });
+  });
+
+  act(() => {
+    useEvents.getState().apply({
+      type: "outline_extend_proposal",
+      added: 2,
+      diff: "+ 第4章 · 新的开始",
+      gate_id: "g1",
+    });
+  });
+  expect(screen.getByTestId("diff-view")).toBeInTheDocument();
+  fireEvent.click(screen.getByTestId("outline-apply"));
+  await waitFor(() => {
+    const call = fetchMock.mock.calls.find((c) => String(c[0]) === "/api/gates/g1");
+    expect(call).toBeTruthy();
+    expect(JSON.parse(String((call![1] as RequestInit).body))).toEqual({
+      approve: true,
+      feedback: "",
+    });
+  });
+});
+
+test("Bible: chat panel in right column for world; outline section is read-only", async () => {
+  stubFetchFor({ bible: { world: BIBLE_WORLD } });
+  renderPage(<Bible />, "/p/:name/bible");
+
+  fireEvent.click(screen.getByText("世界观"));
+  expect(await screen.findByTestId("chat-input")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("大纲"));
+  expect(screen.getByTestId("chat-readonly-note")).toBeInTheDocument();
 });

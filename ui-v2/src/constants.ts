@@ -31,5 +31,14 @@ export const SETUP_STAGE_NAMES: Record<string, string> = {
   outline: "大纲",
 };
 
+export const BIBLE_SECTION_NAMES: Record<string, string> = {
+  concept: "概念",
+  world: "世界观",
+  characters: "人物",
+  outline: "大纲",
+  foreshadows: "伏笔",
+  events: "事件",
+};
+
 /** API 路径构造。 */
 export const p = (n: string): string => `/api/projects/${n}`;
