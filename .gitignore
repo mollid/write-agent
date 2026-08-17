@@ -33,3 +33,4 @@ project.config.yaml
 # ui-v2 (npm)
 ui-v2/node_modules/
 ui-v2/dist/
+.worktrees/
