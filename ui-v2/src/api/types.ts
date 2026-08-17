@@ -34,4 +34,45 @@ export interface JobInfo {
 export interface OutlineInfo {
   arcs: { arc_name: string; chapters: { chapter_no: number; chapter_title: string }[] }[];
 }
+export interface ConceptData {
+  logline: string; genre: string; tone: string; themes: string[];
+  target_length_words: number; audience: string;
+}
+export interface WorldData {
+  setting: string; era: string; rules: string[]; power_system: string;
+  factions: { name: string; ideology: string; resources: string; conflict_with: string }[];
+  locations: { name: string; description: string; narrative_function: string }[];
+  constraints: string[];
+}
+export interface CharacterStateData {
+  emotional_state: string; physical_state: string; knowledge_gained: string[];
+  relationships_shifted: Record<string, string>; location_end: string;
+}
+export interface CharacterData {
+  id: string; slug: string; name: string; role: string; backstory: string;
+  motivation: string; arc: string; voice_fingerprint: Record<string, string>;
+  mannerisms: { text: string; used_count: number }[]; description_history: string[];
+  relationships: Record<string, string>; state: CharacterStateData;
+}
+export interface BeatData {
+  beat_id: string; pov: string; setting: string; event: string; emotional_turn: string;
+  characters: string[]; plants: string[]; payoffs: string[];
+}
+export interface OutlineChapterData {
+  chapter_no: number; chapter_title: string; beats: BeatData[];
+}
+export interface OutlineFullData {
+  arcs: { arc_name: string; chapters: OutlineChapterData[] }[];
+  foreshadow_ledger: { id: string; planted_in: string; paid_off_in: string; description: string }[];
+}
+export interface ForeshadowData {
+  id: string; description: string; planted_ch: number | null;
+  payoff_ch: number | null; status: string;
+}
+export interface EventData { id: string; chapter: number; characters: string[]; summary: string }
+export interface BibleData {
+  concept: ConceptData | null; world: WorldData | null; characters: CharacterData[];
+  outline: OutlineFullData | null; foreshadows: ForeshadowData[];
+  events: EventData[];
+}
 export type SseEvent = Record<string, unknown> & { type: string; job_id?: string };

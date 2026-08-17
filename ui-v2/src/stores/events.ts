@@ -27,6 +27,8 @@ interface EventState {
   /** True while the user dismissed the gate modal without deciding; a NEW gate
    * event or「打开审批」flips it back. The job keeps waiting server-side. */
   gateDismissed: boolean;
+  bibleProposal: { section: string; diff: string; gateId: string; draft: unknown } | null;
+  outlineProposal: { added: number; diff: string; gateId: string } | null;
   pushLine: (text: string) => void;
   setConnected: (v: boolean) => void;
   pushFeedback: (text: string) => void;
@@ -53,6 +55,8 @@ export const useEvents = create<EventState>((set) => ({
   lastEnd: null,
   stripPulse: 0,
   gateDismissed: false,
+  bibleProposal: null,
+  outlineProposal: null,
   pushLine: (text) =>
     set((s) => ({ lines: [...s.lines, { time: fmt(), text }].slice(-MAX_LINES) })),
   setConnected: (v) => set({ connected: v }),
@@ -73,6 +77,15 @@ export const useEvents = create<EventState>((set) => ({
           patch.lastStage = String(ev.stage);
           break;
         case "gate":
+          if (String(ev.label).startsWith("bible:")) {
+            // bible gates render in the Bible page's diff panel, not the global modal
+            if (String(ev.label) === "bible:outline_extend" && s.outlineProposal) {
+              patch.outlineProposal = { ...s.outlineProposal, gateId: String(ev.gate_id ?? "") };
+            } else if (s.bibleProposal) {
+              patch.bibleProposal = { ...s.bibleProposal, gateId: String(ev.gate_id ?? "") };
+            }
+            break;
+          }
           patch.gateDismissed = false;
           patch.gate = {
             id: String(ev.gate_id),
@@ -94,6 +107,8 @@ export const useEvents = create<EventState>((set) => ({
           patch.job = null;
           patch.gate = null;
           patch.progress = null;
+          patch.bibleProposal = null;
+          patch.outlineProposal = null;
           patch.lastEnd = {
             status: String(ev.status ?? "unknown"),
             error: typeof ev.error === "string" ? ev.error : null,
@@ -108,11 +123,32 @@ export const useEvents = create<EventState>((set) => ({
             ? { ...s.progress, done: s.progress.done + 1 }
             : s.progress;
           break;
+        case "bible_proposal":
+          patch.bibleProposal = {
+            section: String(ev.section), diff: String(ev.diff ?? ""),
+            gateId: String(ev.gate_id ?? ""), draft: (ev as { draft?: unknown }).draft,
+          };
+          break;
+        case "bible_chat_done":
+          patch.bibleProposal = null;
+          break;
+        case "outline_extend_proposal":
+          patch.outlineProposal = {
+            added: Number(ev.added ?? 0), diff: String(ev.diff ?? ""),
+            gateId: String(ev.gate_id ?? ""),
+          };
+          break;
+        case "outline_extended":
+          patch.outlineProposal = null;
+          break;
       }
       return patch;
     }),
   resetTransient: () =>
-    set({ gate: null, job: null, progress: null, setupArtifact: null, gateDismissed: false }),
+    set({
+      gate: null, job: null, progress: null, setupArtifact: null, gateDismissed: false,
+      bibleProposal: null, outlineProposal: null,
+    }),
   reset: () =>
     set({
       connected: false,
@@ -126,5 +162,7 @@ export const useEvents = create<EventState>((set) => ({
       lastEnd: null,
       stripPulse: 0,
       gateDismissed: false,
+      bibleProposal: null,
+      outlineProposal: null,
     }),
 }));

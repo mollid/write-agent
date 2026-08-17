@@ -44,7 +44,7 @@ export default function GateModal({ project }: { project: string }) {
     }
   }, [gate]);
 
-  if (!gate || dismissed) return null;
+  if (!gate || dismissed || gate.label.startsWith("bible:")) return null;
   const isSetup = gate.label.startsWith("setup:");
   const isForce = gate.label === "chapter_review_failed";
   const title = isSetup

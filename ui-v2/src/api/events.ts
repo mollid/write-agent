@@ -67,6 +67,16 @@ export function useProjectEvents(project: string | undefined): void {
           if (ev.type === "premise_done" || ev.type === "setup_stage" || ev.type === "job_end") {
             void qc.invalidateQueries({ queryKey: ["status"] });
           }
+          if (
+            ev.type === "bible_applied" ||
+            ev.type === "outline_extended" ||
+            ev.type === "job_end"
+          ) {
+            void qc.invalidateQueries({ queryKey: ["bible"] });
+          }
+          if (ev.type === "outline_extended" || ev.type === "job_end") {
+            void qc.invalidateQueries({ queryKey: ["outline"] });
+          }
         } catch {
           /* ignore */
         }

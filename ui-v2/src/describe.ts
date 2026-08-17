@@ -29,6 +29,16 @@ export function describe(ev: SseEvent): string | null {
       return `设定阶段 ${ev.stage}：第 ${ev.attempt} 次生成（见审批卡片）`;
     case "gate":
       return `⚠ 等待审批：${s("label")}`;
+    case "bible_proposal":
+      return "设定改写稿已生成，等待确认";
+    case "bible_applied":
+      return "设定改写已应用";
+    case "bible_chat_done":
+      return ev.applied ? "对话改写结束（已应用）" : "对话改写结束（未应用）";
+    case "outline_extend_proposal":
+      return "大纲追章方案已生成，等待确认";
+    case "outline_extended":
+      return `大纲已追加 ${ev.added} 章`;
     case "job_end":
       if (ev.status === "done") return "✅ 任务完成";
       if (ev.status === "cancelled") return "任务已取消";

@@ -189,6 +189,17 @@ test("close button dismisses the modal but the gate stays pending; reopen restor
   expect(screen.getByTestId("gate-modal")).toBeInTheDocument();
 });
 
+test("bible:concept gate never opens the global modal", () => {
+  stubFetch();
+  renderModal();
+  act(() => {
+    useEvents.getState().apply({
+      type: "gate", gate_id: "g1", label: "bible:concept", artifact: "{}", job_id: "j1",
+    });
+  });
+  expect(screen.queryByTestId("gate-modal")).not.toBeInTheDocument();
+});
+
 test("JSON artifacts are pretty-printed regardless of wire compactness", () => {
   stubFetch();
   renderModal();

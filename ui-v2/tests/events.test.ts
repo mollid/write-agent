@@ -101,6 +101,31 @@ describe("event store", () => {
     useEvents.getState().apply({ type: "job_end", status: "error", error: "boom", job_id: "j2" });
     expect(useEvents.getState().lastEnd).toMatchObject({ status: "error", error: "boom", seq: 2 });
   });
+
+  test("bible_proposal sets bibleProposal and gate id, not gate modal state", () => {
+    const s = useEvents.getState();
+    s.reset();
+    s.apply({ type: "gate", gate_id: "g1", label: "bible:concept", artifact: "{}" });
+    expect(useEvents.getState().gate).toBeNull();
+    s.apply({ type: "bible_proposal", section: "concept", diff: "+x", draft: { a: 1 } });
+    const st = useEvents.getState();
+    expect(st.gate).toBeNull(); // bible: gates are handled in-page, not by GateModal
+    expect(st.bibleProposal).toEqual({ section: "concept", diff: "+x", gateId: "", draft: { a: 1 } });
+    s.apply({ type: "gate", gate_id: "g1", label: "bible:concept", artifact: "{}" });
+    expect(useEvents.getState().gate).toBeNull();
+    expect(useEvents.getState().bibleProposal?.gateId).toBe("g1");
+  });
+
+  test("bible_chat_done and job_end clear proposal", () => {
+    const s = useEvents.getState();
+    s.reset();
+    s.apply({ type: "bible_proposal", section: "world", diff: "d", draft: {}, gate_id: "g" });
+    s.apply({ type: "bible_chat_done", section: "world", applied: true });
+    expect(useEvents.getState().bibleProposal).toBeNull();
+    s.apply({ type: "outline_extend_proposal", added: 2, diff: "d", gate_id: "g2" });
+    s.apply({ type: "job_end", status: "done", error: null, kind: "bible-chat" });
+    expect(useEvents.getState().outlineProposal).toBeNull();
+  });
 });
 
 describe("describe() log lines", () => {
