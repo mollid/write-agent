@@ -12,6 +12,7 @@ from novel.models import (
     ForeshadowStatus,
     Outline,
     ReviewScore,
+    WeakDim,
     World,
 )
 from novel.project import NovelProject
@@ -83,6 +84,40 @@ def _one_chapter_setup(tmp_path):
     return proj, bible, vector, concept, beat, outline, chars
 
 
+def test_review_event_explains_failure_with_dimension_scores(tmp_path):
+    """The pass rule is EVERY dimension >= score_min (not overall >= score_min),
+    so a review with overall 82 can still fail. The review event must carry
+    the per-dimension scores and the threshold or the GUI log cannot explain
+    why「总分 82 ❌ 未达标」."""
+    proj, bible, vector, concept, _beat, outline, chars = _one_chapter_setup(tmp_path)
+    mixed = ReviewScore(artifact_type="chapter", overall=82,
+                        scores={"prose": DimensionScore(score=76, critique="weak"),
+                                "pacing": DimensionScore(score=90, critique="")})
+    provider = FakeProvider(responses={
+        "strategist": concept,
+        "worldbuilder": World(setting="city"),
+        "character": chars,
+        "outliner": outline,
+        "writer": "Chapter prose text.",
+        "continuity": "[]",
+        "editor": "Chapter prose text.",
+        "scorer": mixed,
+        "extractor": {"character_states": {}, "voice_samples": {}, "mannerisms_used": {},
+                      "key_events": [], "threads_advanced": [],
+                      "new_information_revealed": []},
+    }, tag_key="agent")
+    events: list[dict[str, object]] = []
+    run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                      proj=proj, premise="a thief", target_chapters=1, max_retries=1,
+                      on_event=events.append)
+    reviews = [e for e in events if e.get("type") == "review"]
+    assert len(reviews) == 1
+    assert reviews[0]["overall"] == 82
+    assert reviews[0]["passed"] is False  # prose 76 < 80 despite overall 82
+    assert reviews[0]["scores"] == {"prose": 76, "pacing": 90}
+    assert reviews[0]["score_min"] == 80
+
+
 def test_scorer_cap_escalates_no_hard_pass(tmp_path):
     proj, bible, vector, concept, _beat, outline, chars = _one_chapter_setup(tmp_path)
     failing = ReviewScore(artifact_type="chapter", overall=40,
@@ -104,6 +139,11 @@ def test_scorer_cap_escalates_no_hard_pass(tmp_path):
                               proj=proj, premise="a thief", target_chapters=1, max_retries=2)
     assert state.error == "chapter 1 rejected after 2 attempts"
     assert not (proj.root / "chapters" / "001.md").exists()
+    # weak-spot memory: both failed attempts persisted (merged per dimension)
+    # so later chapters' writer context can avoid the same mistakes
+    from novel.store.notes import WritingNotes
+    assert WritingNotes(proj).weak_by_chapter() == {
+        1: {"beat_adherence": WeakDim(score=40, critique="weak")}}
 
 
 def test_scorer_cap_human_approves(tmp_path):

@@ -168,3 +168,28 @@ class ReviewRecord(BaseModel):
     scores: dict[str, DimensionScore] = Field(default_factory=dict)
     passed: bool = False
     timestamp: str = ""       # ISO-8601 UTC
+
+
+class WeakDim(BaseModel):
+    """One below-threshold review dimension inside a weak-spot note."""
+    score: int
+    critique: str = ""
+
+
+class WritingNote(BaseModel):
+    """Persisted writing-memory record (`.meta/writing_notes.jsonl`): either a
+    human approval directive (`feedback`) or a failed review's weak spots
+    (`weak`) — both replayed into later chapters' writer context."""
+    kind: str                        # "feedback" | "weak"
+    source: str = ""                 # feedback: gate label, e.g. "setup:world"
+    text: str = ""                   # feedback: the human directive
+    chapter: int | None = None       # weak: chapter the review failed on
+    dims: dict[str, WeakDim] = Field(default_factory=dict)  # weak: failing dimensions
+    timestamp: str = ""              # ISO-8601 UTC
+
+
+class RewrittenChapter(BaseModel):
+    """Chapter-rewrite agent output: the complete new prose (plus a one-line
+    summary of what changed, for logs/diffs only)."""
+    prose: str = Field(min_length=1)
+    changes_summary: str = ""

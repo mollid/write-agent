@@ -19,6 +19,7 @@ from novel.resume import is_chapter_complete
 from novel.scorer_rubrics import apply_review, decide
 from novel.setup_flow import approve_stage, generate_stage, stage_done
 from novel.store.bible import StoryBible
+from novel.store.notes import WritingNotes
 from novel.store.reviews import ReviewStore
 from novel.store.vector import VectorMemory
 
@@ -82,6 +83,7 @@ def run_full_pipeline(
 
     scorer = ScorerAgent(provider, agent("scorer"))
     reviews = ReviewStore(proj)
+    notes = WritingNotes(proj)
 
     # stale tmp files from a crashed run must never be mistaken for chapters
     for stale in (proj.root / "chapters").glob(".*.md.tmp"):
@@ -114,7 +116,8 @@ def run_full_pipeline(
             assert beat is not None, f"chapter {chapter_no} has no beat"
             emit({"type": "chapter_start", "chapter": chapter_no, "title": ch_out.chapter_title})
             ctx = assemble_context(beat=beat, bible=bible, vector=vector,
-                                   proj=proj, token_budget=token_budget)
+                                   proj=proj, token_budget=token_budget,
+                                   chapter_no=chapter_no)
             writer = WriterAgent(provider, agent("writer"))
             prose = writer.run(ctx)
             # scorer loop on chapter
@@ -130,8 +133,19 @@ def run_full_pipeline(
                     chapter=chapter_no, attempt=attempt, artifact_type=rs.artifact_type,
                     overall=rs.overall, summary=rs.summary, scores=rs.scores, passed=ok,
                     timestamp=datetime.now(UTC).isoformat()))
+                if not ok:
+                    # persist the below-threshold dimensions so later chapters'
+                    # writer context warns against repeating them
+                    notes.add_weak(chapter_no, {
+                        name: (ds.score, ds.critique)
+                        for name, ds in rs.scores.items() if ds.score < score_min})
                 emit({"type": "review", "chapter": chapter_no, "attempt": attempt,
-                      "passed": ok, "overall": rs.overall})
+                      "passed": ok, "overall": rs.overall,
+                      # pass rule is EVERY dimension >= score_min: ship the
+                      # per-dimension scores + threshold so the GUI log can
+                      # explain why overall 82 may still fail
+                      "scores": {name: ds.score for name, ds in rs.scores.items()},
+                      "score_min": score_min})
                 if ok:
                     final_ok = True
                     break

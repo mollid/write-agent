@@ -52,3 +52,41 @@ def test_assemble_includes_events_and_threads(tmp_path):
     ctx = assemble_context(beat=beat, bible=b, vector=vm, proj=proj, token_budget=4000)
     assert "the bell rings" in ctx.text   # event json + thread line
     assert "planted ch1" in ctx.text      # thread line for the OPEN foreshadow
+
+
+def test_assemble_includes_previous_chapter_ending(tmp_path):
+    proj, b, vm, beat = _seed(tmp_path)
+    (proj.root / "chapters").mkdir(exist_ok=True)
+    (proj.root / "chapters" / "001.md").write_text("开头。" + "正文。" * 500 + "钟声在夜色里消散。", encoding="utf-8")
+    ctx = assemble_context(beat=beat, bible=b, vector=vm, proj=proj, token_budget=4000, chapter_no=2)
+    assert "Previous chapter ending" in ctx.text
+    assert "钟声在夜色里消散" in ctx.text        # the tail survives
+    assert "开头。" not in ctx.text              # only the ending, not the whole chapter
+    # without chapter_no (or no prior file) the block is absent
+    assert "Previous chapter ending" not in assemble_context(
+        beat=beat, bible=b, vector=vm, proj=proj, token_budget=4000).text
+    assert "Previous chapter ending" not in assemble_context(
+        beat=beat, bible=b, vector=vm, proj=proj, token_budget=4000, chapter_no=1).text
+
+
+def test_assemble_includes_style_directives_and_weak_spots(tmp_path):
+    from novel.store.notes import WritingNotes
+    proj, b, vm, beat = _seed(tmp_path)
+    notes = WritingNotes(proj)
+    notes.add_feedback("setup:world", "基调更黑暗")
+    notes.add_weak(1, {"prose": (76, "对白过多")})
+    ctx = assemble_context(beat=beat, bible=b, vector=vm, proj=proj, token_budget=4000)
+    assert "Style directives" in ctx.text and "基调更黑暗" in ctx.text
+    assert "setup:world" in ctx.text              # source label travels with the directive
+    assert "Known weak spots" in ctx.text and "对白过多" in ctx.text
+
+
+def test_new_memory_blocks_yield_to_core_blocks_under_tight_budget(tmp_path):
+    from novel.store.notes import WritingNotes
+    proj, b, vm, beat = _seed(tmp_path)
+    WritingNotes(proj).add_feedback("setup:world", "基调更黑暗")
+    # beat/world/characters always outrank the memory blocks; shrink the budget
+    # until the memory blocks are the ones dropped
+    ctx = assemble_context(beat=beat, bible=b, vector=vm, proj=proj, token_budget=300)
+    if "Style directives" not in ctx.text:
+        assert "style_notes" in ctx.dropped

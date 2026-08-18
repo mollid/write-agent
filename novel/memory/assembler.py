@@ -5,7 +5,10 @@ from dataclasses import dataclass, field
 from novel.models import ChapterBeat, ForeshadowStatus
 from novel.project import NovelProject
 from novel.store.bible import StoryBible
+from novel.store.notes import WritingNotes
 from novel.store.vector import VectorMemory
+
+PREV_ENDING_CHARS = 600  # tail of chapter N-1 injected as a continuity reference
 
 
 def estimate_tokens(text: str) -> int:
@@ -39,8 +42,45 @@ def _character_block(beat: ChapterBeat, bible: StoryBible) -> str:
     return "\n".join(lines)
 
 
+def prev_ending_block(proj: NovelProject, chapter_no: int | None) -> str:
+    """Tail of the previous chapter, read straight from disk — the vector
+    recency hook cannot be trusted to return it (hash embeddings carry no
+    semantics), yet the ending is the strongest continuity/style anchor."""
+    if not chapter_no or chapter_no < 2:
+        return ""
+    f = proj.root / "chapters" / f"{chapter_no - 1:03d}.md"
+    if not f.is_file():
+        return ""
+    tail = f.read_text(encoding="utf-8").strip()[-PREV_ENDING_CHARS:]
+    if not tail:
+        return ""
+    return f"[Previous chapter ending — continue style, POV and plot naturally]\n{tail}"
+
+
+def style_directives_block(notes: WritingNotes) -> str:
+    lines = [f"- ({n.source}) {n.text}" for n in notes.recent_feedback()]
+    if not lines:
+        return ""
+    return "[Style directives — accumulated human approvals; obey throughout]\n" + "\n".join(lines)
+
+
+def weak_spots_block(notes: WritingNotes) -> str:
+    chapters: dict[str, list[int]] = {}
+    latest: dict[str, str] = {}
+    for ch, dims in sorted(notes.weak_by_chapter().items()):
+        for dim, wd in dims.items():
+            chapters.setdefault(dim, []).append(ch)
+            latest[dim] = wd.critique or "—"
+    if not chapters:
+        return ""
+    lines = [f"- {dim}: failed in ch {', '.join(map(str, chs))}; latest critique: {latest[dim]}"
+             for dim, chs in chapters.items()]
+    return "[Known weak spots — recent review failures; avoid repeating]\n" + "\n".join(lines)
+
+
 def assemble_context(
     beat: ChapterBeat, bible: StoryBible, vector: VectorMemory, proj: NovelProject, token_budget: int,
+    chapter_no: int | None = None,
 ) -> AssembledContext:
     beat_block = f"[Beat] pov={beat.pov}; setting={beat.setting}; event={beat.event}; " \
                  f"turn={beat.emotional_turn}; plants={beat.plants}; payoffs={beat.payoffs}"
@@ -53,12 +93,20 @@ def assemble_context(
         f"- {f.description} (planted ch{f.planted_ch})"
         for f in bible.list_foreshadow() if f.status != ForeshadowStatus.PAID_OFF
     )
+    notes = WritingNotes(proj)
+    prev_block = prev_ending_block(proj, chapter_no)
+    style_block = style_directives_block(notes)
+    weak_block = weak_spots_block(notes)
 
-    # priority order: beats > bible(world+character+events+threads) > recency > retrieved(extra)
+    # priority order: beats > prev-ending > bible(world+character) > writing
+    # memory(style+weak) > bible(events+threads) > recency > retrieved(extra)
     candidates = [
         ("beat", beat_block),
+        ("prev_ending", prev_block),
         ("world", world_block),
         ("characters", char_block),
+        ("style_notes", style_block),
+        ("weak_spots", weak_block),
         ("events", events_block),
         ("threads", threads_block),
         ("recency", recency_block),
