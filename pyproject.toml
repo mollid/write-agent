@@ -20,6 +20,7 @@ dependencies = [
   "rich>=13.7",
   "fastapi>=0.141.1",
   "uvicorn[standard]>=0.52.2",
+  "edge-tts>=7.2",
 ]
 
 [project.scripts]
