@@ -50,6 +50,16 @@ class ExtendReq(BaseModel):
     n: int = Field(default=3, ge=1, le=50)
 
 
+class ChapterRewriteReq(BaseModel):
+    chapter: int = Field(ge=1)
+    mode: str = "polish"
+    instruction: str = Field(min_length=1)
+
+
+class ChapterSaveReq(BaseModel):
+    content: str = Field(min_length=1)
+
+
 def _safe_project(root: Path, name: str) -> Path:
     if Path(name).name != name or name in (".", ".."):
         raise HTTPException(status_code=400, detail="非法项目名")
@@ -153,6 +163,27 @@ def create_app(root: Path) -> FastAPI:
         if not f.is_file():
             raise HTTPException(status_code=404, detail=f"章节不存在: {num}")
         return {"chapter": num, "content": f.read_text(encoding="utf-8")}
+
+    @app.put("/api/projects/{name}/chapters/{num}")
+    def save_chapter(name: str, num: int, req: ChapterSaveReq) -> dict[str, object]:
+        """Manual chapter edit: same apply semantics as an approved rewrite —
+        old prose backed up, file replaced atomically, vector memory upserted."""
+        p = _safe_project(root, name)
+        if not (p / "chapters" / f"{num:03d}.md").is_file():
+            raise HTTPException(status_code=404, detail=f"章节不存在: {num}")
+        if manager.active_job(name) is not None:
+            raise HTTPException(status_code=409, detail="该项目有任务运行中，稍后再试")
+        from novel.config import load_config
+        from novel.project import NovelProject
+        proj = NovelProject(root=p)
+        cfg = load_config(proj.config_path) if proj.config_path.is_file() else None
+        min_chars = cfg.generation.min_chapter_chars if cfg else 50
+        if len(req.content.strip()) < min_chars:
+            raise HTTPException(
+                status_code=422,
+                detail=f"正文过短：去空白后至少 {min_chars} 字（防止误存空稿破坏续跑判定）")
+        backup = jobs.apply_chapter_text(p, num, req.content)
+        return {"ok": True, "backup": backup}
 
     @app.get("/api/projects/{name}/threads")
     def get_threads(name: str) -> list[dict[str, str]]:
@@ -278,6 +309,21 @@ def create_app(root: Path) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(e)) from e
         return {"job_id": job.id}
 
+    @app.post("/api/projects/{name}/chapter-rewrite", status_code=202)
+    def start_chapter_rewrite(name: str, req: ChapterRewriteReq) -> dict[str, str]:
+        p = _safe_project(root, name)
+        if req.mode not in ("polish", "rearrange"):
+            raise HTTPException(status_code=422, detail=f"未知改写模式: {req.mode}")
+        if not (p / "chapters" / f"{req.chapter:03d}.md").is_file():
+            raise HTTPException(status_code=404, detail=f"章节不存在: {req.chapter}")
+        try:
+            job = manager.start(name, "chapter-rewrite",
+                                jobs.run_chapter_rewrite_job(p, req.chapter, req.mode,
+                                                             req.instruction))
+        except RuntimeError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+        return {"job_id": job.id}
+
     @app.post("/api/projects/{name}/export")
     def do_export(name: str) -> dict[str, str]:
         p = _safe_project(root, name)
@@ -326,7 +372,7 @@ def create_app(root: Path) -> FastAPI:
             raise HTTPException(status_code=404, detail="任务不存在")
         return {"id": job.id, "kind": job.kind, "status": job.status,
                 "error": job.error, "project": job.project,
-                "gates": [{"id": g.id, "label": g.label}
+                "gates": [{"id": g.id, "label": g.label, "artifact": g.artifact}
                           for g in job.gates.values() if not g.done.is_set()]}
 
     app.mount("/legacy", StaticFiles(directory=STATIC_DIR, html=True), name="legacy")

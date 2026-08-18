@@ -1,6 +1,7 @@
 """Render gate / setup artifacts to displayable text (shared by CLI and UI)."""
 from __future__ import annotations
 
+import difflib
 import json
 
 from pydantic import BaseModel
@@ -24,3 +25,11 @@ def artifact_text(obj: object) -> str:
         except Exception:  # noqa: BLE001 - display only
             return str(obj)
     return str(obj)
+
+
+def text_diff(old: str, new: str) -> str:
+    """Unified line diff of two texts for proposal panels (prose paragraphs are
+    usually one line, so the line diff reads as a paragraph diff)."""
+    lines = difflib.unified_diff(old.splitlines(), new.splitlines(),
+                                 fromfile="当前章稿", tofile="改写稿", lineterm="")
+    return "\n".join(lines)

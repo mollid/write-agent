@@ -253,7 +253,7 @@ def test_setup_endpoint_requires_premise_or_concept(client: TestClient) -> None:
     assert "缺少创意" in r.json()["detail"]
 
 
-def test_setup_endpoint_full_flow(client: TestClient) -> None:
+def test_setup_endpoint_full_flow(client: TestClient, tmp_path: Path) -> None:
     client.post("/api/projects", json={"name": "sx"})
     r = client.post("/api/projects/sx/setup", json={"premise": "a thief"})
     assert r.status_code == 202
@@ -278,6 +278,13 @@ def test_setup_endpoint_full_flow(client: TestClient) -> None:
     assert data["status"] == "done", data.get("error")
     status = client.get("/api/projects/sx/status").json()
     assert status["has_concept"] is True and status["has_outline"] is True
+    # the human feedback persisted into writing memory: later chapters' writer
+    # context will carry it as a style directive
+    from novel.project import NovelProject
+    from novel.store.notes import WritingNotes
+    fb = WritingNotes(NovelProject(root=tmp_path / "sx")).recent_feedback()
+    assert [n.text for n in fb] == ["基调更黑暗"]
+    assert fb[0].source == "setup:concept"
 
 
 def _poll_gate_via_http(client: TestClient, job_id: str, timeout: float = 10.0) -> str:
@@ -289,6 +296,116 @@ def _poll_gate_via_http(client: TestClient, job_id: str, timeout: float = 10.0) 
             return str(g["id"])
         time.sleep(0.05)
     raise AssertionError("job exposed no pending gate")
+
+
+def test_job_pending_gates_carry_artifact(client: TestClient) -> None:
+    """A browser reload restores the gate modal from GET /api/jobs/{id};
+    each pending gate must carry its full artifact or the modal renders
+    「产物内容不可用」with nothing to approve."""
+    client.post("/api/projects", json={"name": "ga"})
+    job_id = client.post("/api/projects/ga/setup", json={"premise": "a thief"}).json()["job_id"]
+    gate: dict[str, object] | None = None
+    deadline = time.time() + 10.0
+    while gate is None and time.time() < deadline:
+        for g in client.get(f"/api/jobs/{job_id}").json().get("gates", []):
+            gate = g
+        time.sleep(0.05)
+    assert gate is not None
+    assert str(gate["artifact"]).lstrip().startswith("{")
+    # drain the job so its thread exits before the fixture tears down
+    data = client.get(f"/api/jobs/{job_id}").json()
+    while data["status"] == "running":
+        gates = data.get("gates", [])
+        if gates:
+            client.post(f"/api/gates/{gates[0]['id']}", json={"approve": True})
+        time.sleep(0.05)
+        data = client.get(f"/api/jobs/{job_id}").json()
+
+
+def test_chapter_rewrite_flow(client: TestClient, tmp_path: Path) -> None:
+    """Rewrite proposal gate: feedback round → approve → chapter updated, old
+    prose backed up, vector memory upserted with the new prose."""
+    client.post("/api/projects", json={"name": "rw"})
+    ch = tmp_path / "rw" / "chapters" / "001.md"
+    ch.write_text("第一章原文。", encoding="utf-8")
+    # error paths: missing chapter / unknown mode
+    assert client.post("/api/projects/rw/chapter-rewrite",
+                       json={"chapter": 9, "mode": "polish", "instruction": "x"},
+                       ).status_code == 404
+    assert client.post("/api/projects/rw/chapter-rewrite",
+                       json={"chapter": 1, "mode": "hack", "instruction": "x"},
+                       ).status_code == 422
+    r = client.post("/api/projects/rw/chapter-rewrite",
+                    json={"chapter": 1, "mode": "polish", "instruction": "更克制"})
+    assert r.status_code == 202
+    job_id = r.json()["job_id"]
+    gate_id = _poll_gate_via_http(client, job_id)
+    # feedback → a fresh gate for round 2
+    assert client.post("/api/gates/" + gate_id,
+                       json={"approve": False, "feedback": "再短一点"}).status_code == 200
+    gate_id2 = _poll_gate_via_http(client, job_id)
+    assert gate_id2 != gate_id
+    assert client.post("/api/gates/" + gate_id2, json={"approve": True}).status_code == 200
+    data = _wait_job(client, job_id)
+    assert data["status"] == "done", data.get("error")
+    assert "演示模式改写稿" in ch.read_text(encoding="utf-8")
+    backups = list((tmp_path / "rw" / ".meta" / "chapter_versions").glob("001-*.md"))
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == "第一章原文。"
+    # vector memory upserted: ch1 now carries the rewritten prose
+    from novel.project import NovelProject
+    from novel.store.vector import VectorMemory
+    docs = VectorMemory(NovelProject(root=tmp_path / "rw")).retrieve("第1章", k=10)
+    assert any("演示模式改写稿" in d for d in docs)
+
+
+def test_chapter_rewrite_abandon_leaves_chapter_intact(client: TestClient, tmp_path: Path) -> None:
+    client.post("/api/projects", json={"name": "rwa"})
+    ch = tmp_path / "rwa" / "chapters" / "001.md"
+    ch.write_text("原文保持不变。", encoding="utf-8")
+    job_id = client.post("/api/projects/rwa/chapter-rewrite",
+                         json={"chapter": 1, "mode": "rearrange", "instruction": "重排"}
+                         ).json()["job_id"]
+    gate_id = _poll_gate_via_http(client, job_id)
+    # reject without feedback = abandon: nothing changes, no backup
+    assert client.post("/api/gates/" + gate_id, json={"approve": False}).status_code == 200
+    data = _wait_job(client, job_id)
+    assert data["status"] == "done"
+    assert ch.read_text(encoding="utf-8") == "原文保持不变。"
+    assert not (tmp_path / "rwa" / ".meta" / "chapter_versions").exists()
+
+
+def test_chapter_manual_edit(client: TestClient, tmp_path: Path) -> None:
+    """PUT /chapters/{n}: manual edit saves with backup + vector upsert; guards
+    404 (unknown), 422 (too short), 409 (job running)."""
+    client.post("/api/projects", json={"name": "me"})
+    ch = tmp_path / "me" / "chapters" / "001.md"
+    ch.write_text("第一版正文。", encoding="utf-8")
+    assert client.put("/api/projects/me/chapters/9",
+                      json={"content": "x" * 60}).status_code == 404
+    assert client.put("/api/projects/me/chapters/1",
+                      json={"content": "太短"}).status_code == 422
+    r = client.put("/api/projects/me/chapters/1",
+                   json={"content": "手写修订后的第二版正文。" * 6})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert "手写修订" in ch.read_text(encoding="utf-8")
+    backups = list((tmp_path / "me" / ".meta" / "chapter_versions").glob("001-*.md"))
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == "第一版正文。"
+    from novel.project import NovelProject
+    from novel.store.vector import VectorMemory
+    docs = VectorMemory(NovelProject(root=tmp_path / "me")).retrieve("第1章", k=10)
+    assert any("手写修订" in d for d in docs)
+    # 409 while a job is running: leave the rewrite job's gate pending
+    job_id = client.post("/api/projects/me/chapter-rewrite",
+                         json={"chapter": 1, "mode": "polish", "instruction": "再改"}
+                         ).json()["job_id"]
+    _poll_gate_via_http(client, job_id)
+    assert client.put("/api/projects/me/chapters/1",
+                      json={"content": "y" * 60}).status_code == 409
+    for g in client.get(f"/api/jobs/{job_id}").json().get("gates", []):
+        client.post(f"/api/gates/{g['id']}", json={"approve": False})
+    assert _wait_job(client, job_id)["status"] == "done"
 
 
 def test_outline_endpoint(client: TestClient) -> None:

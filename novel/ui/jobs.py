@@ -201,11 +201,13 @@ def run_setup_job(proj_root: Path, premise: str) -> Callable[[Job], object]:
         from novel.runtime import AGENT_NAMES, make_provider
         from novel.setup_flow import SETUP_STAGES, approve_stage, generate_stage, stage_done
         from novel.store.bible import StoryBible
+        from novel.store.notes import WritingNotes
 
         proj = NovelProject(root=proj_root)
         cfg = load_config(proj.config_path)
         provider = make_provider(cfg)
         bible = StoryBible(proj)
+        notes = WritingNotes(proj)
         cfg_map = {name: cfg.model_for(name) for name in AGENT_NAMES}
         for stage in SETUP_STAGES:
             if stage_done(stage, bible):
@@ -218,6 +220,10 @@ def run_setup_job(proj_root: Path, premise: str) -> Callable[[Job], object]:
                 job.emit({"type": "setup_stage", "stage": stage, "attempt": len(feedback) + 1,
                           "artifact": artifact_text(artifact)})
                 approved, fb = job.gate_with_feedback(f"setup:{stage}", artifact)
+                if fb:
+                    # writing memory: approval directives keep shaping every
+                    # later chapter instead of being spent on one regeneration
+                    notes.add_feedback(f"setup:{stage}", fb)
                 if approved:
                     approve_stage(stage, artifact, bible)
                     break
@@ -261,6 +267,104 @@ def run_chapters_job(proj_root: Path, n: int) -> Callable[[Job], object]:
             on_gate=job.gate if is_live_mode() else None,
             on_event=job.emit,
         )
+    return fn
+
+
+def apply_chapter_text(proj_root: Path, chapter_no: int, draft: str) -> str:
+    """Shared apply step for chapter rewrites and manual edits: back up the
+    current prose under .meta/chapter_versions/, replace the chapter file
+    atomically, and upsert vector memory with the new prose. Returns the
+    backup file's name."""
+    from datetime import UTC, datetime
+
+    from novel.project import NovelProject
+    from novel.store.vector import VectorMemory, hash_embed
+
+    chapter_file = proj_root / "chapters" / f"{chapter_no:03d}.md"
+    original = chapter_file.read_text(encoding="utf-8")
+    backup_dir = proj_root / ".meta" / "chapter_versions"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    backup = backup_dir / f"{chapter_no:03d}-{ts}.md"
+    backup.write_text(original, encoding="utf-8")
+    VectorMemory(NovelProject(root=proj_root), embed=hash_embed).add_chapter(chapter_no, draft)
+    tmp = chapter_file.with_name(f".{chapter_no:03d}.md.tmp")
+    tmp.write_text(draft, encoding="utf-8")
+    tmp.replace(chapter_file)
+    return backup.name
+
+
+def run_chapter_rewrite_job(proj_root: Path, chapter_no: int, mode: str,
+                            instruction: str) -> Callable[[Job], object]:
+    """Chapter rewrite (polish / rearrange), bible-chat style: draft → text-diff
+    proposal → gate (approve / feedback rounds / abandon). On apply the old
+    prose is backed up under .meta/chapter_versions/, the chapter file is
+    replaced atomically, and vector memory is upserted with the new prose."""
+    from novel.agents.rewriter import ChapterRewriteAgent, RewriteInput
+    from novel.config import load_config
+    from novel.memory.assembler import (
+        prev_ending_block,
+        style_directives_block,
+        weak_spots_block,
+    )
+    from novel.project import NovelProject
+    from novel.render import text_diff
+    from novel.runtime import is_live_mode, make_provider
+    from novel.store.bible import StoryBible
+    from novel.store.notes import WritingNotes
+
+    def fn(job: Job) -> object:
+        assert mode in ("polish", "rearrange"), f"unknown rewrite mode: {mode}"
+        proj = NovelProject(root=proj_root)
+        cfg = load_config(proj.config_path)
+        bible = StoryBible(proj)
+        notes = WritingNotes(proj)
+        chapter_file = proj.root / "chapters" / f"{chapter_no:03d}.md"
+        original = chapter_file.read_text(encoding="utf-8")
+
+        # beat + title for continuity constraints; rewrite works without them too
+        beat_json, title = "", f"第 {chapter_no} 章"
+        outline = bible.get_outline()
+        if outline is not None:
+            for arc in outline.arcs:
+                for c in arc.chapters:
+                    if c.chapter_no == chapter_no:
+                        title = c.chapter_title or title
+                        if c.beats:
+                            beat_json = c.beats[0].model_dump_json()
+                        break
+
+        cur_instruction = instruction
+        history: list[tuple[str, str]] = []
+        for _round in range(3):
+            if is_live_mode():
+                provider = make_provider(cfg)
+                draft = ChapterRewriteAgent(provider, cfg.model_for("rewriter")).run(
+                    RewriteInput(chapter_no=chapter_no, title=title, mode=mode,
+                                 instruction=cur_instruction, original=original,
+                                 beat_json=beat_json,
+                                 style_block=style_directives_block(notes),
+                                 weak_block=weak_spots_block(notes),
+                                 prev_ending=prev_ending_block(proj, chapter_no),
+                                 history=history)).prose
+            else:
+                draft = original + "\n\n（演示模式改写稿）"
+            job.emit({"type": "chapter_proposal", "chapter": chapter_no, "mode": mode,
+                      "diff": text_diff(original, draft), "draft": draft})
+            approved, fb = job.gate_with_feedback(f"rewrite:{chapter_no}", draft)
+            if approved:
+                backup = apply_chapter_text(proj_root, chapter_no, draft)
+                job.emit({"type": "rewrite_applied", "chapter": chapter_no,
+                          "backup": backup})
+                job.emit({"type": "rewrite_done", "chapter": chapter_no, "applied": True})
+                return None
+            if not fb:
+                job.emit({"type": "rewrite_done", "chapter": chapter_no, "applied": False})
+                return None
+            history.append((cur_instruction, "rejected"))
+            cur_instruction = fb
+        job.emit({"type": "rewrite_done", "chapter": chapter_no, "applied": False})
+        return None
     return fn
 
 
