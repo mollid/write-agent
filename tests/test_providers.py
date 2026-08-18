@@ -26,3 +26,14 @@ def test_fake_provider_missing_raises():
     with pytest.raises(KeyError):
         p.complete_structured(messages=[{"role": "user", "agent": "x", "content": ""}],
                               schema=Concept, cfg=ModelConfig("zhipu", "x"))
+
+
+def test_import_litellm_forces_local_cost_map(monkeypatch):
+    # the env var must be set before `import litellm` so litellm skips its
+    # remote model-prices fetch (network timeout warning on slow links)
+    import os
+    monkeypatch.delenv("LITELLM_LOCAL_MODEL_COST_MAP", raising=False)
+    from novel.providers import _import_litellm
+    litellm = _import_litellm()
+    assert os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] == "True"
+    assert hasattr(litellm, "completion")

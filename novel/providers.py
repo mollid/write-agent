@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+from types import ModuleType
 from typing import ClassVar, Protocol, runtime_checkable
 
 from pydantic import BaseModel
@@ -20,6 +22,20 @@ class ModelProvider(Protocol):
         *,
         seed: int | None = None,
     ) -> BaseModel: ...
+
+
+def _import_litellm() -> ModuleType:
+    """Import litellm with the remote model-cost-map fetch disabled.
+
+    litellm pulls model_prices_and_context_window.json from GitHub during
+    import; on a slow/blocked network that read times out (warning + startup
+    delay) before falling back to the bundled local map. We only call models
+    explicitly listed in project.config.yaml, so force the local map upfront.
+    Env var must be set before the first `import litellm` to take effect.
+    """
+    os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+    import litellm
+    return litellm
 
 
 def _agent_tag(messages: list[dict[str, object]], tag_key: str) -> str:
@@ -120,7 +136,7 @@ class LiteLLMProvider:
         return [{"role": "system", "content": f"[Language] {directive}"}]
 
     def complete(self, messages: list[dict[str, object]], cfg: ModelConfig, *, seed: int | None = None) -> str:
-        import litellm  # local import: keeps tests import-free of network libs
+        litellm = _import_litellm()
 
         kwargs: dict[str, object] = {"model": f"{cfg.provider}/{cfg.model}",
                                      "messages": self._lang_message() + messages, "seed": seed}
@@ -143,7 +159,7 @@ class LiteLLMProvider:
         *,
         seed: int | None = None,
     ) -> BaseModel:
-        import litellm  # noqa: F401
+        _import_litellm()  # ensure the local cost map is forced before completion runs
 
         schema_json = schema.model_json_schema()
         sys_msg: list[dict[str, object]] = [
