@@ -16,6 +16,7 @@ export const STAGE_NAMES: Record<string, string> = {
   continuity: "连续性检查中",
   editor: "编辑润色中",
   extractor: "状态提取与回写中",
+  rewriting: "改写稿生成中",
 };
 
 export const GATE_LABELS: Record<string, string> = {

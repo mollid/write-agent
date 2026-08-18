@@ -1,4 +1,4 @@
-import { Alert, App as AntApp, Button, Card, Empty, Input, Menu, Segmented, Space, Typography } from "antd";
+import { Alert, App as AntApp, Button, Card, Empty, Input, Menu, Segmented, Space, Spin, Typography } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
@@ -33,6 +33,11 @@ export default function Reader() {
   const [feedback, setFeedback] = useState("");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  /** True from the moment the rewrite POST is accepted until its proposal
+   * lands (or the job dies) — the model call in between can take a minute,
+   * and without feedback the page reads as frozen. */
+  const [rewritePending, setRewritePending] = useState(false);
+  const lastEnd = useEvents((s) => s.lastEnd);
   const { message } = AntApp.useApp();
 
   const titles = useMemo(() => {
@@ -64,6 +69,19 @@ export default function Reader() {
     setEditing(false);
   }, [selected]);
 
+  // the awaited proposal arrived — stop the pending indicator (match chapter:
+  // a stale proposal from another chapter must not clear it prematurely)
+  useEffect(() => {
+    if (proposal != null && selected != null && proposal.chapter === selected)
+      setRewritePending(false);
+  }, [proposal, selected]);
+
+  // job died (done/error/cancelled) before a proposal landed — stop spinning
+  const endSeq = lastEnd?.seq ?? 0;
+  useEffect(() => {
+    if (endSeq > 0) setRewritePending(false);
+  }, [endSeq]);
+
   const hasLaterChapters = selected != null && chapters.some((c) => c > selected);
 
   function startEditing() {
@@ -92,9 +110,16 @@ export default function Reader() {
       return;
     }
     setFeedback("");
+    setRewritePending(true);
     rewrite.mutate(
       { chapter: selected, mode, instruction: instruction.trim() },
-      { onError: (e) => message.error(String(e)) },
+      {
+        onSuccess: () => message.info("已开始改写，改写稿生成后将在下方展示"),
+        onError: (e) => {
+          setRewritePending(false);
+          message.error(String(e));
+        },
+      },
     );
   }
 
@@ -251,6 +276,16 @@ export default function Reader() {
                 message="本章之后已有后续章节：重写本章可能与后续内容衔接不畅"
               />
             )}
+            {rewritePending && (
+              <Alert
+                data-testid="rewrite-pending"
+                type="info"
+                showIcon
+                icon={<Spin size="small" />}
+                style={{ marginBottom: 8 }}
+                message="正在生成改写稿…（真实模型模式下约需数十秒到一分钟，可在顶部任务条查看进度或取消）"
+              />
+            )}
             <Space direction="vertical" size="small" style={{ width: "100%" }}>
               <Segmented
                 data-testid="rewrite-mode"
@@ -266,6 +301,7 @@ export default function Reader() {
                 rows={2}
                 value={instruction}
                 onChange={(e) => setInstruction(e.target.value)}
+                disabled={rewritePending}
                 placeholder={
                   mode === "polish"
                     ? "微调指令，例如：把结尾的对白改短，语气更克制"
@@ -276,7 +312,7 @@ export default function Reader() {
                 type="primary"
                 data-testid="rewrite-start"
                 disabled={selected == null || !!job}
-                loading={rewrite.isPending}
+                loading={rewrite.isPending || rewritePending}
                 onClick={startRewrite}
               >
                 开始改写

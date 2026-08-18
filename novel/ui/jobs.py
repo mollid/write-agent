@@ -337,6 +337,9 @@ def run_chapter_rewrite_job(proj_root: Path, chapter_no: int, mode: str,
         cur_instruction = instruction
         history: list[tuple[str, str]] = []
         for _round in range(3):
+            # announce before the (potentially minute-long) generation call:
+            # until the first event the UI has no signal the job is alive
+            job.emit({"type": "stage", "stage": "rewriting", "chapter": chapter_no})
             if is_live_mode():
                 provider = make_provider(cfg)
                 draft = ChapterRewriteAgent(provider, cfg.model_for("rewriter")).run(

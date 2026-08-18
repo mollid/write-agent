@@ -498,6 +498,36 @@ test("Reader: rewrite card — mode + instruction POST /chapter-rewrite; later-c
       chapter: 1, mode: "rearrange", instruction: "结尾更克制",
     });
   });
+  // pending indicator shows while the draft generates, clears when the
+  // proposal for THIS chapter lands (regression: frozen-looking page)
+  expect(await screen.findByTestId("rewrite-pending")).toBeInTheDocument();
+  act(() => {
+    useEvents.getState().apply({
+      type: "chapter_proposal", chapter: 1, mode: "rearrange",
+      diff: "d", draft: "全文", job_id: "j",
+    });
+  });
+  await waitFor(() =>
+    expect(screen.queryByTestId("rewrite-pending")).not.toBeInTheDocument());
+  // a proposal for ANOTHER chapter must not clear our pending state
+  act(() => {
+    useEvents.getState().apply({ type: "job_end", status: "done", job_id: "j" });
+  });
+  fireEvent.click(screen.getByTestId("rewrite-start"));
+  expect(await screen.findByTestId("rewrite-pending")).toBeInTheDocument();
+  act(() => {
+    useEvents.getState().apply({
+      type: "chapter_proposal", chapter: 9, mode: "polish",
+      diff: "d", draft: "全文", job_id: "j",
+    });
+  });
+  expect(screen.getByTestId("rewrite-pending")).toBeInTheDocument();
+  // job_end (error/cancel) also clears it
+  act(() => {
+    useEvents.getState().apply({ type: "job_end", status: "error", error: "x", job_id: "j" });
+  });
+  await waitFor(() =>
+    expect(screen.queryByTestId("rewrite-pending")).not.toBeInTheDocument());
 });
 
 test("Reader: proposal panel shows diff; approve resolves the rewrite gate", async () => {
