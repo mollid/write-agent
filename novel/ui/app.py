@@ -56,6 +56,14 @@ class ChapterRewriteReq(BaseModel):
     instruction: str = Field(min_length=1)
 
 
+class TtsReq(BaseModel):
+    chapter: int = Field(ge=1)
+    voice: str
+    rate: str = "+0%"
+    volume: str = "+0%"
+    pitch: str = "+0Hz"
+
+
 class ChapterSaveReq(BaseModel):
     content: str = Field(min_length=1)
 
@@ -323,6 +331,43 @@ def create_app(root: Path) -> FastAPI:
         except RuntimeError as e:
             raise HTTPException(status_code=409, detail=str(e)) from e
         return {"job_id": job.id}
+
+    @app.post("/api/projects/{name}/tts", status_code=202)
+    def start_tts(name: str, req: TtsReq) -> dict[str, str]:
+        p = _safe_project(root, name)
+        from novel.tts import validate_tts_params
+        try:
+            validate_tts_params(req.voice, req.rate, req.volume, req.pitch)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+        if not (p / "chapters" / f"{req.chapter:03d}.md").is_file():
+            raise HTTPException(status_code=404, detail=f"章节不存在: {req.chapter}")
+        try:
+            job = manager.start(name, "tts", jobs.run_tts_job(
+                p, req.chapter, req.voice, req.rate, req.volume, req.pitch))
+        except RuntimeError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+        return {"job_id": job.id}
+
+    @app.get("/api/projects/{name}/audio")
+    def list_audio(name: str) -> list[dict[str, int]]:
+        p = _safe_project(root, name)
+        audio_dir = p / "audio"
+        if not audio_dir.is_dir():
+            return []
+        out = []
+        for f in sorted(audio_dir.glob("*.mp3")):
+            if f.stem.isdigit():
+                out.append({"chapter": int(f.stem), "size": f.stat().st_size})
+        return out
+
+    @app.get("/api/projects/{name}/audio/{num}")
+    def get_audio(name: str, num: int) -> FileResponse:
+        p = _safe_project(root, name)
+        f = p / "audio" / f"{num:03d}.mp3"
+        if not f.is_file():
+            raise HTTPException(status_code=404, detail=f"音频不存在: {num}")
+        return FileResponse(f, media_type="audio/mpeg", filename=f.name)
 
     @app.post("/api/projects/{name}/export")
     def do_export(name: str) -> dict[str, str]:

@@ -565,3 +565,30 @@ def drain(q: Queue[dict[str, object]], timeout: float = 0.05) -> list[dict[str, 
             out.append(q.get(timeout=timeout))
         except Empty:
             return out
+
+
+def run_tts_job(proj_root: Path, chapter: int, voice: str, rate: str,
+                volume: str, pitch: str) -> Callable[[Job], object]:
+    """Chapter → MP3 via edge-tts (live) or a silent placeholder (demo).
+    Emits stage:tts before the synth call so the JobStrip comes alive
+    immediately, then tts_done."""
+    from novel.runtime import is_live_mode
+    from novel.tts import SILENT_MP3, synth_to_file
+
+    def fn(job: Job) -> object:
+        job.emit({"type": "stage", "stage": "tts", "chapter": chapter})
+        text = (proj_root / "chapters" / f"{chapter:03d}.md").read_text(encoding="utf-8")
+        audio_dir = proj_root / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        out = audio_dir / f"{chapter:03d}.mp3"
+        if is_live_mode():
+            synth_to_file(text, voice, rate, volume, pitch, out)
+        else:
+            tmp = out.with_suffix(out.suffix + ".tmp")
+            tmp.write_bytes(SILENT_MP3)
+            import os as _os
+            _os.replace(tmp, out)
+        job.emit({"type": "tts_done", "chapter": chapter})
+        return {"chapter": chapter, "path": str(out)}
+
+    return fn
