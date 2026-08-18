@@ -60,8 +60,10 @@ export default function Generate() {
     }
   }
 
-  // job_end → final toast + refresh facts (the job may have started elsewhere)
-  const endSeq = useRef(0);
+  // job_end → final toast + refresh facts (the job may have started elsewhere).
+  // Seed the dedup seq with any lastEnd that predates this mount — otherwise
+  // every visit (sidebar re-navigation) replays the previous job's toast.
+  const endSeq = useRef(lastEnd?.seq ?? 0);
   useEffect(() => {
     if (!lastEnd || lastEnd.seq === endSeq.current) return;
     endSeq.current = lastEnd.seq;
