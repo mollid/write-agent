@@ -4,7 +4,8 @@ import { useReviews } from "../api/hooks";
 import type { ReviewRecord } from "../api/types";
 import { Trend, trendPoints } from "../components/Trend";
 
-/** Group reviews by chapter; attempts in ascending attempt order. */
+/** Group reviews by chapter; groups and attempts both newest-first (ISO
+ * timestamps compare lexicographically; attempt number breaks ties). */
 export function groupByChapter(records: ReviewRecord[]): [number, ReviewRecord[]][] {
   const map = new Map<number, ReviewRecord[]>();
   for (const r of records) {
@@ -12,9 +13,11 @@ export function groupByChapter(records: ReviewRecord[]): [number, ReviewRecord[]
     list.push(r);
     map.set(r.chapter, list);
   }
+  const byTimeDesc = (a: ReviewRecord, b: ReviewRecord) =>
+    b.timestamp.localeCompare(a.timestamp) || b.attempt - a.attempt;
   return [...map.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([ch, list]) => [ch, list.sort((a, b) => a.attempt - b.attempt)]);
+    .map(([ch, list]) => [ch, list.sort(byTimeDesc)] as [number, ReviewRecord[]])
+    .sort((a, b) => byTimeDesc(a[1][0], b[1][0]));
 }
 
 /** Task 8: score history — per-chapter collapse with attempts, plus an
@@ -39,7 +42,9 @@ export default function Reviews() {
           <Collapse
             defaultActiveKey={grouped.map(([ch]) => String(ch))}
             items={grouped.map(([ch, attempts]) => {
-              const final = attempts[attempts.length - 1];
+              // attempts are newest-first; the chapter's outcome is its
+              // chronologically last attempt
+              const final = attempts.reduce((a, b) => (a.attempt > b.attempt ? a : b));
               return {
                 key: String(ch),
                 // forceRender keeps attempt rows mounted (collapsed panels would

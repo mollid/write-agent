@@ -614,6 +614,19 @@ test("Reviews: groups by chapter, final badge + attempts with text scores (not c
   expect(screen.getByText("prose：86 分")).toBeInTheDocument();
 });
 
+test("Reviews: groups newest-first — latest chapter group on top, newest attempt first", async () => {
+  stubFetchFor({ reviews: REVIEWS });
+  renderPage(<Reviews />, "/p/:name/reviews");
+
+  // groups ordered by latest review time: ch2 (11:00) before ch1 (10:05)
+  const headers = await screen.findAllByText(/第 \d+ 章/);
+  expect(headers[0]).toHaveTextContent("第 2 章");
+  expect(headers[1]).toHaveTextContent("第 1 章");
+  // within ch1, attempt 2 (10:05) renders before attempt 1 (10:00)
+  const a2 = screen.getByTestId("review-attempt-1-2");
+  expect(a2.nextElementSibling?.getAttribute("data-testid")).toBe("review-attempt-1-1");
+});
+
 test("Reviews: trend svg renders for ≥2 chapters with role=img + aria-label", async () => {
   stubFetchFor({ reviews: REVIEWS });
   renderPage(<Reviews />, "/p/:name/reviews");
