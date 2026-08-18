@@ -17,6 +17,7 @@ export const STAGE_NAMES: Record<string, string> = {
   editor: "编辑润色中",
   extractor: "状态提取与回写中",
   rewriting: "改写稿生成中",
+  tts: "语音合成中",
 };
 
 export const GATE_LABELS: Record<string, string> = {
@@ -44,6 +45,21 @@ export const BIBLE_SECTION_NAMES: Record<string, string> = {
 export const REWRITE_MODE_NAMES: Record<string, string> = {
   polish: "微调",
   rearrange: "创意重编排",
+};
+
+/** edge-tts 预设音色表（与后端 novel/tts.py 的 TTS_VOICES 保持一致——两侧
+ * 各自硬编码，测试各锁一份，改动需同步）。 */
+export const TTS_VOICE_NAMES: Record<string, string> = {
+  "zh-CN-XiaoxiaoNeural": "晓晓（女 · 温暖通用）",
+  "zh-CN-XiaoyiNeural": "晓伊（女 · 活泼）",
+  "zh-CN-XiaochenNeural": "晓辰（女 · 知性）",
+  "zh-CN-XiaomengNeural": "晓梦（女 · 温柔）",
+  "zh-CN-XiaoqiuNeural": "晓秋（女 · 文艺）",
+  "zh-CN-YunxiNeural": "云希（男 · 阳光）",
+  "zh-CN-YunjianNeural": "云健（男 · 浑厚）",
+  "zh-CN-YunyangNeural": "云扬（男 · 新闻）",
+  "zh-CN-YunyeNeural": "云野（男 · 成熟）",
+  "zh-CN-YunxiaNeural": "云夏（男 · 少年）",
 };
 
 /** API 路径构造。 */

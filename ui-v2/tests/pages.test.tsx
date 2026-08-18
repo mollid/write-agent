@@ -66,6 +66,7 @@ function stubFetchFor(over: {
   bible?: Partial<BibleData>;
   putBibleStatus?: number;
   putBibleDetail?: string;
+  audio?: { chapter: number; size: number }[];
 } = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -92,6 +93,11 @@ function stubFetchFor(over: {
         );
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     }
+    if (url === "/api/projects/x/audio")
+      return new Response(JSON.stringify(over.audio ?? []), { status: 200 });
+    if (/^\/api\/projects\/x\/audio\/\d+$/.test(url))
+      return new Response(new Blob(["mp3"]), { status: 200,
+        headers: { "content-type": "audio/mpeg" } });
     const chMatch = url.match(/^\/api\/projects\/x\/chapters\/(\d+)$/);
     if (chMatch) {
       const n = Number(chMatch[1]);
@@ -146,6 +152,7 @@ function renderPage(el: ReactElement, routePath = "/p/:name/setup", initialEntry
 afterEach(() => {
   vi.unstubAllGlobals();
   useEvents.getState().reset();
+  window.localStorage.clear();
 });
 
 // ---------- Setup page ----------
@@ -1047,4 +1054,91 @@ test("Bible: chat panel in right column for world; outline section is read-only"
   expect(await screen.findByTestId("chat-input")).toBeInTheDocument();
   fireEvent.click(screen.getByText("大纲"));
   expect(screen.getByTestId("chat-readonly-note")).toBeInTheDocument();
+});
+
+// ---------- Reader TTS card (edge-tts Task 3) ----------
+
+test("Reader: TTS card — voice select, sliders, reset; POST /tts carries params", async () => {
+  const fetchMock = stubFetchFor({ status: { has_outline: true, chapters: [1] } });
+  renderPage(<Reader />, "/p/:name/reader");
+  await screen.findByTestId("tts-card");
+
+  // defaults visible
+  expect(screen.getByTestId("tts-voice")).toHaveTextContent("晓晓");
+  expect(screen.getByTestId("tts-rate-label")).toHaveTextContent("语速 +0%");
+  expect(screen.getByTestId("tts-pitch-label")).toHaveTextContent("音调 +0Hz");
+
+  // antd 5 Select renders no native <select>: open the dropdown and click the option
+  fireEvent.mouseDown(screen.getByTestId("tts-voice").querySelector(".ant-select-selector")!);
+  fireEvent.click(await screen.findByText("云希（男 · 阳光）"));
+  // antd Slider in jsdom: keyboard on the handle (ArrowRight ×4 = +20 at step 5)
+  for (let i = 0; i < 4; i++) {
+    const handle = screen.getByTestId("tts-rate").querySelector(".ant-slider-handle")!;
+    fireEvent.keyDown(handle, { key: "ArrowRight", keyCode: 39 });
+  }
+  await waitFor(() =>
+    expect(screen.getByTestId("tts-rate-label")).toHaveTextContent("语速 +20%"));
+
+  // reset restores defaults (before generate: reset is disabled while pending)
+  fireEvent.click(screen.getByTestId("tts-reset"));
+  await waitFor(() => {
+    expect(screen.getByTestId("tts-rate-label")).toHaveTextContent("语速 +0%");
+    expect(screen.getByTestId("tts-voice")).toHaveTextContent("晓晓");
+  });
+
+  // re-select for the POST assertion
+  fireEvent.mouseDown(screen.getByTestId("tts-voice").querySelector(".ant-select-selector")!);
+  fireEvent.click(await screen.findByText("云希（男 · 阳光）"));
+  for (let i = 0; i < 4; i++) {
+    const handle = screen.getByTestId("tts-rate").querySelector(".ant-slider-handle")!;
+    fireEvent.keyDown(handle, { key: "ArrowRight", keyCode: 39 });
+  }
+  await waitFor(() =>
+    expect(screen.getByTestId("tts-rate-label")).toHaveTextContent("语速 +20%"));
+
+  fireEvent.click(screen.getByTestId("tts-generate"));
+  await waitFor(() => {
+    const call = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/tts"));
+    expect(call).toBeDefined();
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      chapter: 1, voice: "zh-CN-YunxiNeural",
+      rate: "+20%", volume: "+0%", pitch: "+0Hz",
+    });
+  });
+});
+
+test("Reader: TTS pending feedback clears on tts_done; player appears from /audio", async () => {
+  stubFetchFor({ status: { has_outline: true, chapters: [1] }, audio: [{ chapter: 1, size: 1024 }] });
+  renderPage(<Reader />, "/p/:name/reader");
+  await screen.findByTestId("tts-card");
+
+  // existing audio renders a player
+  expect(await screen.findByTestId("tts-player")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByTestId("tts-generate"));
+  expect(await screen.findByTestId("tts-pending")).toBeInTheDocument();
+
+  act(() => {
+    useEvents.getState().apply({ type: "stage", stage: "tts", chapter: 1, job_id: "j" });
+    useEvents.getState().apply({ type: "tts_done", chapter: 1, job_id: "j" });
+  });
+  await waitFor(() =>
+    expect(screen.queryByTestId("tts-pending")).not.toBeInTheDocument());
+});
+
+test("Reader: TTS params persist to localStorage and refill on remount", async () => {
+  stubFetchFor({ status: { has_outline: true, chapters: [1] } });
+  renderPage(<Reader />, "/p/:name/reader");
+  await screen.findByTestId("tts-card");
+  // ArrowRight ×6 = +30 at step 5
+  for (let i = 0; i < 6; i++) {
+    const handle = screen.getByTestId("tts-rate").querySelector(".ant-slider-handle")!;
+    fireEvent.keyDown(handle, { key: "ArrowRight", keyCode: 39 });
+  }
+  fireEvent.click(screen.getByTestId("tts-generate"));
+  await waitFor(() => {
+    const raw = window.localStorage.getItem("tts-params:x");
+    expect(raw).toBeTruthy();
+    expect(JSON.parse(raw!)).toMatchObject({ rate: 30 });
+  });
 });

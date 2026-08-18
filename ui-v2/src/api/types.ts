@@ -70,6 +70,10 @@ export interface ForeshadowData {
   payoff_ch: number | null; status: string;
 }
 export interface EventData { id: string; chapter: number; characters: string[]; summary: string }
+export interface AudioInfo {
+  chapter: number;
+  size: number;
+}
 export interface BibleData {
   concept: ConceptData | null; world: WorldData | null; characters: CharacterData[];
   outline: OutlineFullData | null; foreshadows: ForeshadowData[];

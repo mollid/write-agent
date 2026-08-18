@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import { p } from "../constants";
-import type { BibleData, OutlineInfo, ProjectStatus, ReviewRecord, Thread } from "./types";
+import type { AudioInfo, BibleData, OutlineInfo, ProjectStatus, ReviewRecord, Thread } from "./types";
 
 export interface ProjectSummary {
   name: string;
@@ -251,5 +251,22 @@ export function useSaveChapter(name: string) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["chapters", name] });
     },
+  });
+}
+
+export function useAudioList(name: string) {
+  return useQuery({
+    queryKey: ["audio", name],
+    queryFn: () => api<AudioInfo[]>(`${p(name)}/audio`),
+  });
+}
+
+export function useTts(name: string) {
+  return useMutation({
+    mutationFn: (vars: { chapter: number; voice: string; rate: string; volume: string; pitch: string }) =>
+      api<{ job_id: string }>(`${p(name)}/tts`, {
+        method: "POST",
+        body: JSON.stringify(vars),
+      }),
   });
 }

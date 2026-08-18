@@ -1,16 +1,18 @@
-import { Alert, App as AntApp, Button, Card, Empty, Input, Menu, Segmented, Space, Spin, Typography } from "antd";
+import { Alert, App as AntApp, Button, Card, Empty, Input, Menu, Segmented, Select, Slider, Space, Spin, Typography } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
+  useAudioList,
   useChapter,
   useChapterRewrite,
   useOutline,
   useResolveGate,
   useSaveChapter,
   useStatus,
+  useTts,
 } from "../api/hooks";
 import { useEvents } from "../stores/events";
-import { REWRITE_MODE_NAMES } from "../constants";
+import { REWRITE_MODE_NAMES, TTS_VOICE_NAMES } from "../constants";
 
 /** Task 8: chapter reader — left chapter list (outline titles), right prose at
  * a comfortable measure. F1: `?chapter=N` deep links from Generate preselect.
@@ -39,6 +41,17 @@ export default function Reader() {
   const [rewritePending, setRewritePending] = useState(false);
   const lastEnd = useEvents((s) => s.lastEnd);
   const { message } = AntApp.useApp();
+
+  // edge-tts: synthesis controls + pending feedback (mirrors the rewrite card)
+  const audioList = useAudioList(name);
+  const tts = useTts(name);
+  // numeric slider values, serialized as edge-tts strings on request
+  const [ttsVoice, setTtsVoice] = useState("zh-CN-XiaoxiaoNeural");
+  const [ttsRate, setTtsRate] = useState(0);      // percent
+  const [ttsVolume, setTtsVolume] = useState(0);  // percent
+  const [ttsPitch, setTtsPitch] = useState(0);    // Hz
+  const [ttsPending, setTtsPending] = useState(false);
+  const ttsDone = useEvents((s) => s.ttsDone);
 
   const titles = useMemo(() => {
     const m = new Map<number, string>();
@@ -82,6 +95,29 @@ export default function Reader() {
     if (endSeq > 0) setRewritePending(false);
   }, [endSeq]);
 
+  // refill persisted TTS params once per project
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(`tts-params:${name}`);
+      if (raw) {
+        const v = JSON.parse(raw) as { voice: string; rate: number; volume: number; pitch: number };
+        setTtsVoice(v.voice); setTtsRate(v.rate); setTtsVolume(v.volume); setTtsPitch(v.pitch);
+      }
+    } catch { /* ignore corrupt entries */ }
+  }, [name]);
+
+  // tts_done for our chapter ends the pending state (audio for the chapter
+  // appearing in /audio — reload or the SSE invalidation — also ends it)
+  useEffect(() => {
+    if (ttsDone != null && ttsDone.chapter === selected) setTtsPending(false);
+  }, [ttsDone, selected]);
+  useEffect(() => {
+    if (audioList.data?.some((a) => a.chapter === selected)) setTtsPending(false);
+  }, [audioList.data, selected]);
+  useEffect(() => {
+    if ((lastEnd?.seq ?? 0) > 0) setTtsPending(false);
+  }, [lastEnd?.seq]);
+
   const hasLaterChapters = selected != null && chapters.some((c) => c > selected);
 
   function startEditing() {
@@ -119,6 +155,23 @@ export default function Reader() {
           setRewritePending(false);
           message.error(String(e));
         },
+      },
+    );
+  }
+
+  function startTts() {
+    if (selected == null) return;
+    const pct = (v: number) => `${v >= 0 ? "+" : ""}${v}%`;
+    const hz = (v: number) => `${v >= 0 ? "+" : ""}${v}Hz`;
+    window.localStorage.setItem(
+      `tts-params:${name}`,
+      JSON.stringify({ voice: ttsVoice, rate: ttsRate, volume: ttsVolume, pitch: ttsPitch }));
+    setTtsPending(true);
+    tts.mutate(
+      { chapter: selected, voice: ttsVoice, rate: pct(ttsRate), volume: pct(ttsVolume), pitch: hz(ttsPitch) },
+      {
+        onSuccess: () => message.info("已开始合成，完成后可在此试听"),
+        onError: (e) => { setTtsPending(false); message.error(String(e)); },
       },
     );
   }
@@ -317,6 +370,71 @@ export default function Reader() {
               >
                 开始改写
               </Button>
+            </Space>
+          </Card>
+        )}
+        {chapters.length > 0 && (
+          <Card size="small" title="语音合成" data-testid="tts-card">
+            <Space direction="vertical" size="small" style={{ width: "100%" }}>
+              <div data-testid="tts-voice">
+                <Select
+                  style={{ minWidth: 220 }}
+                  value={ttsVoice}
+                  onChange={setTtsVoice}
+                  disabled={ttsPending}
+                  options={Object.entries(TTS_VOICE_NAMES).map(([value, label]) => ({ value, label }))}
+                />
+              </div>
+              <div data-testid="tts-rate">
+                <Typography.Text data-testid="tts-rate-label" type="secondary">
+                  {`语速 ${ttsRate >= 0 ? "+" : ""}${ttsRate}%`}
+                </Typography.Text>
+                <Slider min={-50} max={100} step={5} value={ttsRate}
+                        onChange={(v) => setTtsRate(v as number)} disabled={ttsPending} />
+              </div>
+              <div data-testid="tts-volume">
+                <Typography.Text data-testid="tts-volume-label" type="secondary">
+                  {`音量 ${ttsVolume >= 0 ? "+" : ""}${ttsVolume}%`}
+                </Typography.Text>
+                <Slider min={-50} max={100} step={5} value={ttsVolume}
+                        onChange={(v) => setTtsVolume(v as number)} disabled={ttsPending} />
+              </div>
+              <div data-testid="tts-pitch">
+                <Typography.Text data-testid="tts-pitch-label" type="secondary">
+                  {`音调 ${ttsPitch >= 0 ? "+" : ""}${ttsPitch}Hz`}
+                </Typography.Text>
+                <Slider min={-50} max={50} step={5} value={ttsPitch}
+                        onChange={(v) => setTtsPitch(v as number)} disabled={ttsPending} />
+              </div>
+              {ttsPending && (
+                <Alert data-testid="tts-pending" type="info" showIcon icon={<Spin size="small" />}
+                       message="正在合成语音…" />
+              )}
+              <Space>
+                <Button type="primary" data-testid="tts-generate"
+                        disabled={selected == null || !!job || ttsPending}
+                        loading={tts.isPending || ttsPending} onClick={startTts}>
+                  生成语音
+                </Button>
+                <Button data-testid="tts-reset" disabled={ttsPending}
+                        onClick={() => { setTtsVoice("zh-CN-XiaoxiaoNeural"); setTtsRate(0); setTtsVolume(0); setTtsPitch(0); }}>
+                  重置默认
+                </Button>
+              </Space>
+              {(() => {
+                const hit = audioList.data?.find((a) => a.chapter === selected);
+                return hit ? (
+                  <Space direction="vertical" size={0} style={{ width: "100%" }}>
+                    <audio data-testid="tts-player" controls preload="none"
+                           style={{ width: "100%" }}
+                           src={`/api/projects/${name}/audio/${hit.chapter}`} />
+                    <a href={`/api/projects/${name}/audio/${hit.chapter}`}
+                       download={`${String(hit.chapter).padStart(3, "0")}.mp3`}>
+                      下载 MP3（{(hit.size / 1024).toFixed(0)} KB）
+                    </a>
+                  </Space>
+                ) : null;
+              })()}
             </Space>
           </Card>
         )}

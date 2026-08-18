@@ -38,6 +38,9 @@ interface EventState {
   /** Task 9: last bible_chat_done outcome (seq re-triggers repeated payloads);
    * BibleChat panels watch it to flip their pending history entry. */
   bibleChatDone: { section: string; applied: boolean; seq: number } | null;
+  /** edge-tts: last tts_done (seq re-triggers repeated payloads); the Reader
+   * TTS card watches it to clear its pending spinner for that chapter. */
+  ttsDone: { chapter: number; seq: number } | null;
   pushLine: (text: string) => void;
   setConnected: (v: boolean) => void;
   pushFeedback: (text: string) => void;
@@ -68,6 +71,7 @@ export const useEvents = create<EventState>((set) => ({
   outlineProposal: null,
   chapterProposal: null,
   bibleChatDone: null,
+  ttsDone: null,
   pushLine: (text) =>
     set((s) => ({ lines: [...s.lines, { time: fmt(), text }].slice(-MAX_LINES) })),
   setConnected: (v) => set({ connected: v }),
@@ -182,6 +186,12 @@ export const useEvents = create<EventState>((set) => ({
         case "rewrite_done":
           patch.chapterProposal = null;
           break;
+        case "tts_done":
+          patch.ttsDone = {
+            chapter: Number(ev.chapter ?? 0),
+            seq: (s.ttsDone?.seq ?? 0) + 1,
+          };
+          break;
       }
       return patch;
     }),
@@ -189,6 +199,7 @@ export const useEvents = create<EventState>((set) => ({
     set({
       gate: null, job: null, progress: null, setupArtifact: null, gateDismissed: false,
       bibleProposal: null, outlineProposal: null, chapterProposal: null, bibleChatDone: null,
+      ttsDone: null,
     }),
   reset: () =>
     set({
@@ -207,5 +218,6 @@ export const useEvents = create<EventState>((set) => ({
       outlineProposal: null,
       chapterProposal: null,
       bibleChatDone: null,
+      ttsDone: null,
     }),
 }));

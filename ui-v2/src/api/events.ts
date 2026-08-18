@@ -79,6 +79,9 @@ export function useProjectEvents(project: string | undefined): void {
             void qc.invalidateQueries({ queryKey: ["chapters"] });
             void qc.invalidateQueries({ queryKey: ["status"] });
           }
+          if (ev.type === "tts_done") {
+            void qc.invalidateQueries({ queryKey: ["audio"] });
+          }
         } catch {
           /* ignore */
         }

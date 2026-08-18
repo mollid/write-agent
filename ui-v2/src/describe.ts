@@ -58,6 +58,8 @@ export function describe(ev: SseEvent): string | null {
       return `✔ 第 ${ev.chapter} 章已按改写稿更新（旧稿已备份）`;
     case "rewrite_done":
       return ev.applied ? "章节改写完成" : "章节改写未应用";
+    case "tts_done":
+      return `✔ 第 ${ev.chapter} 章语音已生成`;
     case "job_end":
       if (ev.status === "done") return "✅ 任务完成";
       if (ev.status === "cancelled") return "任务已取消";
