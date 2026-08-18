@@ -1,3 +1,5 @@
+import pytest
+
 from novel.memory.extractor import (
     EXTRACTOR_SYSTEM,
     EXTRACTOR_USER,
@@ -91,6 +93,48 @@ def test_extractor_build_messages_injects_roster_and_prose():
     assert "- c1 (Ara)" in user
     assert "Ara stood by the bell." in user
     assert user.rstrip().endswith("</prose>")
+
+
+def test_extract_updates_retries_on_malformed_json_then_succeeds():
+    # live models occasionally emit JSON with syntax slips (missing ':',
+    # trailing commas); one bad payload must not kill the chapter job.
+    calls: list[list[dict[str, object]]] = []
+
+    class _Flaky:
+        tag_key = "agent"
+
+        def __init__(self) -> None:
+            self.n = 0
+
+        def complete_structured(self, messages, schema, cfg, *, seed=None):
+            calls.append(list(messages))
+            self.n += 1
+            if self.n == 1:
+                # syntax error inside the JSON body — same failure mode as the
+                # reported ValidationError (expected `:` at line/column)
+                return schema.model_validate_json(
+                    '{\n "character_states": {\n  "c1"\n }\n}')
+            return schema.model_validate({"new_information_revealed": ["the bell is cracked"]})
+
+    out = extract_updates(chapter_no=2, prose="prose", characters=_chars(),
+                          provider=_Flaky(), cfg=ModelConfig("zhipu", "x"))  # type: ignore[arg-type]
+    assert out.new_information_revealed == ["the bell is cracked"]
+    assert len(calls) == 2
+    # the retry carries the validation error back to the model as feedback
+    assert "failed validation" in str(calls[1][-1]["content"])
+
+
+def test_extract_updates_raises_after_exhausted_retries():
+    class _AlwaysBad:
+        tag_key = "agent"
+
+        def complete_structured(self, messages, schema, cfg, *, seed=None):
+            return schema.model_validate_json("{not json")
+
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        extract_updates(chapter_no=2, prose="prose", characters=_chars(),
+                        provider=_AlwaysBad(), cfg=ModelConfig("zhipu", "x"))  # type: ignore[arg-type]
 
 
 def test_extractor_prompts_match_spec_shape():

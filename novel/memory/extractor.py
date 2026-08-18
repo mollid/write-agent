@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from novel.config import ModelConfig
 from novel.models import Character, CharacterState, KeyEvent
@@ -83,6 +83,9 @@ class ChapterUpdates:
     new_information_revealed: list[str] = field(default_factory=list)
 
 
+MAX_RETRIES = 2
+
+
 def extract_updates(
     chapter_no: int,
     prose: str,
@@ -104,13 +107,32 @@ def extract_updates(
         {"role": "system", "agent": "extractor", "content": system},
         {"role": "user", "agent": "extractor", "content": user},
     ]
-    payload = provider.complete_structured(messages, _UpdatePayload, cfg)
-    assert isinstance(payload, _UpdatePayload)
-    return ChapterUpdates(
-        character_states=payload.character_states,
-        voice_samples=payload.voice_samples,
-        mannerisms_used=payload.mannerisms_used,
-        key_events=payload.key_events,
-        threads_advanced=payload.threads_advanced,
-        new_information_revealed=payload.new_information_revealed,
-    )
+    # Same retry-with-error-feedback contract as Agent.run(): live models
+    # occasionally emit JSON with syntax slips, and one malformed payload must
+    # not discard an already-written chapter (extraction precedes the file commit).
+    last_err: ValidationError | None = None
+    for _attempt in range(MAX_RETRIES + 1):
+        try:
+            payload = provider.complete_structured(messages, _UpdatePayload, cfg)
+            assert isinstance(payload, _UpdatePayload)
+            return ChapterUpdates(
+                character_states=payload.character_states,
+                voice_samples=payload.voice_samples,
+                mannerisms_used=payload.mannerisms_used,
+                key_events=payload.key_events,
+                threads_advanced=payload.threads_advanced,
+                new_information_revealed=payload.new_information_revealed,
+            )
+        except ValidationError as e:
+            last_err = e
+            messages = messages + [
+                {"role": "assistant", "agent": "extractor", "content": "<invalid output>"},
+                {
+                    "role": "user",
+                    "agent": "extractor",
+                    "content": f"Your output failed validation: {e}. "
+                               "Fix the JSON syntax and return ONLY the valid JSON object.",
+                },
+            ]
+    assert last_err is not None
+    raise last_err
