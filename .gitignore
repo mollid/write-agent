@@ -34,3 +34,6 @@ project.config.yaml
 ui-v2/node_modules/
 ui-v2/dist/
 .worktrees/
+
+# 生成的小说项目（运行产物）
+vampire/
