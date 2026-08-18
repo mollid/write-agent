@@ -10,6 +10,12 @@ def test_scaffold_creates_layout(tmp_path):
     assert (proj.root / "chapters").is_dir()
     assert (proj.root / "memory" / "chroma").is_dir()
 
+def test_scaffold_writes_self_ignoring_gitignore(tmp_path):
+    proj = NovelProject.scaffold("my-novel", genre="fantasy", root=tmp_path)
+    gi = proj.root / ".gitignore"
+    assert gi.exists()
+    assert gi.read_text(encoding="utf-8").strip() == "*"
+
 def test_save_and_load_canonical_round_trip(tmp_path):
     proj = NovelProject.scaffold("n", genre="g", root=tmp_path)
     proj.save_canonical({"concept": {"genre": "fantasy"}})

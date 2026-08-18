@@ -42,6 +42,7 @@ class NovelProject:
         (proj_root / "runs").mkdir(parents=True, exist_ok=True)
         (proj_root / ".meta" / "reviews").mkdir(parents=True, exist_ok=True)
         (proj_root / "project.config.yaml").write_text(_DEFAULT_CONFIG, encoding="utf-8")
+        (proj_root / ".gitignore").write_text("*\n", encoding="utf-8")
         (proj_root / "bible" / "foreshadowing.json").write_text("[]", encoding="utf-8")
         (proj_root / "bible" / "events.jsonl").write_text("", encoding="utf-8")
         cls(proj_root).save_canonical({"genre": genre})
