@@ -5,6 +5,7 @@ import {
   useAudioList,
   useChapter,
   useChapterRewrite,
+  useMode,
   useOutline,
   useResolveGate,
   useSaveChapter,
@@ -22,6 +23,7 @@ export default function Reader() {
   const { name = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: status } = useStatus(name);
+  const { data: modeInfo } = useMode();
   const { data: outline } = useOutline(name);
   const [selected, setSelected] = useState<number | null>(null);
   const chapter = useChapter(name, selected);
@@ -375,6 +377,15 @@ export default function Reader() {
         )}
         {chapters.length > 0 && (
           <Card size="small" title="语音合成" data-testid="tts-card">
+            {modeInfo && !modeInfo.live && (
+              <Alert
+                type="info"
+                showIcon
+                data-testid="tts-demo-notice"
+                message="演示模式：生成的是占位静音音频"
+                style={{ marginBottom: 8 }}
+              />
+            )}
             <Space direction="vertical" size="small" style={{ width: "100%" }}>
               <div data-testid="tts-voice">
                 <Select

@@ -1112,6 +1112,9 @@ test("Reader: TTS pending feedback clears on tts_done; player appears from /audi
   renderPage(<Reader />, "/p/:name/reader");
   await screen.findByTestId("tts-card");
 
+  // demo mode (stubFetchFor defaults to live:false) shows the placeholder-audio notice
+  expect(await screen.findByTestId("tts-demo-notice")).toBeInTheDocument();
+
   // existing audio renders a player
   expect(await screen.findByTestId("tts-player")).toBeInTheDocument();
 
