@@ -20,6 +20,7 @@ import Projects from "./pages/Projects";
 import Overview from "./pages/Overview";
 import Setup from "./pages/Setup";
 import Bible from "./pages/Bible";
+import Relationships from "./pages/Relationships";
 import Generate from "./pages/Generate";
 import Reader from "./pages/Reader";
 import Reviews from "./pages/Reviews";
@@ -44,6 +45,7 @@ function Shell() {
         { key: "overview", label: "概览" },
         { key: "setup", label: "分阶段设定" },
         { key: "bible", label: "设定库" },
+        { key: "relationships", label: "关系图谱" },
         { key: "generate", label: "生成章节" },
         { key: "reader", label: "章节阅读" },
       ],
@@ -159,6 +161,7 @@ export default function App() {
                 <Route path="overview" element={<Overview />} />
                 <Route path="setup" element={<Setup />} />
                 <Route path="bible" element={<Bible />} />
+                <Route path="relationships" element={<Relationships />} />
                 <Route path="generate" element={<Generate />} />
                 <Route path="reader" element={<Reader />} />
                 <Route path="reviews" element={<Reviews />} />
