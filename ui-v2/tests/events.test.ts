@@ -126,6 +126,31 @@ describe("event store", () => {
     s.apply({ type: "job_end", status: "done", error: null, kind: "bible-chat" });
     expect(useEvents.getState().outlineProposal).toBeNull();
   });
+
+  test("chapter_proposal → rewrite gate attaches id (never the global modal) → done clears", () => {
+    const s = useEvents.getState();
+    s.reset();
+    s.apply({ type: "chapter_proposal", chapter: 3, mode: "polish", diff: "+d", draft: "p", job_id: "j" });
+    expect(useEvents.getState().chapterProposal).toEqual({
+      chapter: 3, mode: "polish", diff: "+d", draft: "p", gateId: "",
+    });
+    s.apply({ type: "gate", gate_id: "g9", label: "rewrite:3", artifact: "p", job_id: "j" });
+    const st = useEvents.getState();
+    expect(st.gate).toBeNull(); // rewrite gates render in the Reader panel only
+    expect(st.chapterProposal?.gateId).toBe("g9");
+    s.apply({ type: "rewrite_done", chapter: 3, applied: true, job_id: "j" });
+    expect(useEvents.getState().chapterProposal).toBeNull();
+  });
+
+  test("a reconnected rewrite gate rebuilds the proposal from the artifact", () => {
+    const s = useEvents.getState();
+    s.reset();
+    s.apply({ type: "gate", gate_id: "g7", label: "rewrite:5", artifact: "草稿全文", job_id: "j" });
+    expect(useEvents.getState().chapterProposal).toEqual({
+      chapter: 5, mode: "", diff: "", draft: "草稿全文", gateId: "g7",
+    });
+    expect(useEvents.getState().gate).toBeNull();
+  });
 });
 
 describe("describe() log lines", () => {
@@ -140,6 +165,20 @@ describe("describe() log lines", () => {
     expect(
       describeEvent({ type: "review", chapter: 1, attempt: 2, overall: 88, passed: false, job_id: "j" }),
     ).toBe("  评审：总分 88（第 2 次尝试）❌ 未达标");
+    // pass rule = every dimension >= score_min: a failed review lists the weak
+    // dimensions so 总分 82 + ❌ never looks contradictory
+    expect(
+      describeEvent({
+        type: "review", chapter: 1, attempt: 3, overall: 82, passed: false,
+        scores: { prose: 76, continuity: 79, pacing: 90 }, score_min: 80, job_id: "j",
+      }),
+    ).toBe("  评审：总分 82（第 3 次尝试）❌ 未达标：prose 76、continuity 79（每项需 ≥80）");
+    expect(
+      describeEvent({
+        type: "review", chapter: 1, attempt: 1, overall: 90, passed: true,
+        scores: { prose: 90 }, score_min: 80, job_id: "j",
+      }),
+    ).toBe("  评审：总分 90（第 1 次尝试）✅ 通过");
     expect(describeEvent({ type: "chapter_done", chapter: 1, job_id: "j" })).toBe(
       "✔ 第 1 章完成并已保存",
     );
@@ -157,6 +196,21 @@ describe("describe() log lines", () => {
     ).toBe("设定阶段 world 已通过，跳过");
     expect(describeEvent({ type: "gate", gate_id: "g", label: "chapter", job_id: "j" })).toBe(
       "⚠ 等待审批：chapter",
+    );
+    expect(describeEvent({ type: "outline_extend_proposal", added: 2, job_id: "j" })).toBe(
+      "大纲追章方案已生成，等待确认",
+    );
+    expect(describeEvent({ type: "outline_extended", added: 2, job_id: "j" })).toBe(
+      "大纲已追加 2 章",
+    );
+    expect(describeEvent({ type: "chapter_proposal", chapter: 3, mode: "polish", job_id: "j" })).toBe(
+      "第 3 章改写稿已生成，等待确认",
+    );
+    expect(describeEvent({ type: "rewrite_applied", chapter: 3, job_id: "j" })).toBe(
+      "✔ 第 3 章已按改写稿更新（旧稿已备份）",
+    );
+    expect(describeEvent({ type: "rewrite_done", chapter: 3, applied: false, job_id: "j" })).toBe(
+      "章节改写未应用",
     );
     expect(describeEvent({ type: "job_end", status: "done", job_id: "j" })).toBe("✅ 任务完成");
     expect(describeEvent({ type: "job_end", status: "cancelled", job_id: "j" })).toBe("任务已取消");

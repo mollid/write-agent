@@ -40,5 +40,10 @@ export const BIBLE_SECTION_NAMES: Record<string, string> = {
   events: "事件",
 };
 
+export const REWRITE_MODE_NAMES: Record<string, string> = {
+  polish: "微调",
+  rearrange: "创意重编排",
+};
+
 /** API 路径构造。 */
 export const p = (n: string): string => `/api/projects/${n}`;

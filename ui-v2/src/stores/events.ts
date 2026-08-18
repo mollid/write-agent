@@ -29,6 +29,12 @@ interface EventState {
   gateDismissed: boolean;
   bibleProposal: { section: string; diff: string; gateId: string; draft: unknown } | null;
   outlineProposal: { added: number; diff: string; gateId: string } | null;
+  /** Pending chapter rewrite (Reader page panel): draft diff awaiting the
+   * rewrite:{N} gate. `draft` doubles as reload fallback when `diff` is empty
+   * (a reconnected gate event carries the draft but not the diff). */
+  chapterProposal: {
+    chapter: number; mode: string; diff: string; draft: string; gateId: string;
+  } | null;
   /** Task 9: last bible_chat_done outcome (seq re-triggers repeated payloads);
    * BibleChat panels watch it to flip their pending history entry. */
   bibleChatDone: { section: string; applied: boolean; seq: number } | null;
@@ -60,6 +66,7 @@ export const useEvents = create<EventState>((set) => ({
   gateDismissed: false,
   bibleProposal: null,
   outlineProposal: null,
+  chapterProposal: null,
   bibleChatDone: null,
   pushLine: (text) =>
     set((s) => ({ lines: [...s.lines, { time: fmt(), text }].slice(-MAX_LINES) })),
@@ -90,6 +97,20 @@ export const useEvents = create<EventState>((set) => ({
             }
             break;
           }
+          if (String(ev.label).startsWith("rewrite:")) {
+            // rewrite gates render in the Reader page's proposal panel
+            const ch = Number(String(ev.label).slice(8));
+            if (s.chapterProposal && s.chapterProposal.chapter === ch) {
+              patch.chapterProposal = { ...s.chapterProposal, gateId: String(ev.gate_id ?? "") };
+            } else {
+              // reload/reconnect recovery: the gate artifact carries the draft
+              patch.chapterProposal = {
+                chapter: ch, mode: "", diff: "",
+                draft: String(ev.artifact ?? ""), gateId: String(ev.gate_id ?? ""),
+              };
+            }
+            break;
+          }
           patch.gateDismissed = false;
           patch.gate = {
             id: String(ev.gate_id),
@@ -113,6 +134,7 @@ export const useEvents = create<EventState>((set) => ({
           patch.progress = null;
           patch.bibleProposal = null;
           patch.outlineProposal = null;
+          patch.chapterProposal = null;
           patch.lastEnd = {
             status: String(ev.status ?? "unknown"),
             error: typeof ev.error === "string" ? ev.error : null,
@@ -150,13 +172,23 @@ export const useEvents = create<EventState>((set) => ({
         case "outline_extended":
           patch.outlineProposal = null;
           break;
+        case "chapter_proposal":
+          patch.chapterProposal = {
+            chapter: Number(ev.chapter ?? 0), mode: String(ev.mode ?? ""),
+            diff: String(ev.diff ?? ""), draft: String(ev.draft ?? ""),
+            gateId: String(ev.gate_id ?? ""),
+          };
+          break;
+        case "rewrite_done":
+          patch.chapterProposal = null;
+          break;
       }
       return patch;
     }),
   resetTransient: () =>
     set({
       gate: null, job: null, progress: null, setupArtifact: null, gateDismissed: false,
-      bibleProposal: null, outlineProposal: null, bibleChatDone: null,
+      bibleProposal: null, outlineProposal: null, chapterProposal: null, bibleChatDone: null,
     }),
   reset: () =>
     set({
@@ -173,6 +205,7 @@ export const useEvents = create<EventState>((set) => ({
       gateDismissed: false,
       bibleProposal: null,
       outlineProposal: null,
+      chapterProposal: null,
       bibleChatDone: null,
     }),
 }));

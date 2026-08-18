@@ -7,6 +7,7 @@ import { MemoryRouter, Route, Routes, useSearchParams } from "react-router-dom";
 import Setup from "../src/pages/Setup";
 import Generate from "../src/pages/Generate";
 import Reader from "../src/pages/Reader";
+import Relationships from "../src/pages/Relationships";
 import Reviews from "../src/pages/Reviews";
 import Threads from "../src/pages/Threads";
 import Export from "../src/pages/Export";
@@ -17,8 +18,10 @@ import JobStrip from "../src/components/JobStrip";
 import { ArtifactView } from "../src/components/ArtifactView";
 import { Trend, trendPoints } from "../src/components/Trend";
 import { useEvents } from "../src/stores/events";
+import { buildGraph } from "../src/components/RelationGraph";
 import type {
   BibleData,
+  CharacterData,
   ConceptData,
   OutlineFullData,
   ProjectStatus,
@@ -403,6 +406,22 @@ test("Generate: log lines render; job_end toasts and invalidates", async () => {
   expect(useEvents.getState().progress).toBeNull();
 });
 
+test("Generate: a lastEnd from before the visit is not re-toasted; a new job_end still is", async () => {
+  stubFetchFor({ status: { has_outline: true, chapters: [1] }, outline: OUTLINE_RESP });
+  act(() => {
+    useEvents.getState().apply({ type: "job_end", status: "done", job_id: "j0" });
+  });
+  renderGenerate();
+
+  expect(await screen.findByTestId("page-generate")).toBeInTheDocument();
+  expect(screen.queryByText("任务完成")).not.toBeInTheDocument();
+
+  act(() => {
+    useEvents.getState().apply({ type: "job_end", status: "cancelled", job_id: "j9" });
+  });
+  await waitFor(() => expect(screen.getByText("任务已取消")).toBeInTheDocument());
+});
+
 // ---------- Reader page (T8 + F1) ----------
 
 function SearchProbe() {
@@ -453,6 +472,92 @@ test("Reader: empty state links to the generate page", async () => {
 
   expect(await screen.findByText("尚无章节")).toBeInTheDocument();
   expect(screen.getByText("去生成")).toHaveAttribute("href", "/p/x/generate");
+});
+
+test("Reader: rewrite card — mode + instruction POST /chapter-rewrite; later-chapter warning", async () => {
+  const fetchMock = stubFetchFor({ status: { has_outline: true, chapters: [1, 2] } });
+  renderPage(<Reader />, "/p/:name/reader");
+  await screen.findByTestId("rewrite-card");
+
+  // chapter 1 selected but chapter 2 exists → continuity warning
+  expect(screen.getByText(/重写本章可能与后续内容衔接不畅/)).toBeInTheDocument();
+
+  fireEvent.click(screen.getByTestId("rewrite-start"));
+  // empty instruction is blocked client-side
+  expect(
+    fetchMock.mock.calls.some((c) => String(c[0]).endsWith("/chapter-rewrite")),
+  ).toBe(false);
+
+  fireEvent.change(screen.getByTestId("rewrite-instruction"), { target: { value: "结尾更克制" } });
+  fireEvent.click(screen.getByTitle("创意重编排")); // Segmented option
+  fireEvent.click(screen.getByTestId("rewrite-start"));
+  await waitFor(() => {
+    const call = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/chapter-rewrite"));
+    expect(call).toBeDefined();
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      chapter: 1, mode: "rearrange", instruction: "结尾更克制",
+    });
+  });
+});
+
+test("Reader: proposal panel shows diff; approve resolves the rewrite gate", async () => {
+  const fetchMock = stubFetchFor({ status: { has_outline: true, chapters: [1] } });
+  renderPage(<Reader />, "/p/:name/reader");
+  await screen.findByTestId("rewrite-card");
+  expect(screen.queryByTestId("rewrite-proposal")).not.toBeInTheDocument();
+
+  act(() => {
+    useEvents.getState().apply({
+      type: "chapter_proposal", chapter: 1, mode: "polish",
+      diff: "--- 当前章稿\n+++ 改写稿\n@@\n+新结尾", draft: "全文", job_id: "j",
+    });
+    useEvents.getState().apply({
+      type: "gate", gate_id: "gr1", label: "rewrite:1", artifact: "全文", job_id: "j",
+    });
+  });
+
+  expect(await screen.findByTestId("rewrite-proposal")).toBeInTheDocument();
+  expect(screen.getByTestId("rewrite-diff")).toHaveTextContent("新结尾");
+  expect(screen.getByText(/第 1 章改写提案 · 微调/)).toBeInTheDocument();
+
+  fireEvent.click(screen.getByTestId("rewrite-approve"));
+  await waitFor(() => {
+    const call = fetchMock.mock.calls.find((c) =>
+      String(c[0]) === "/api/gates/gr1" && c[1]?.method === "POST");
+    expect(call).toBeDefined();
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ approve: true, feedback: "" });
+  });
+});
+
+test("Reader: manual edit — prefilled textarea, cancel reverts, save PUTs content", async () => {
+  const fetchMock = stubFetchFor({ status: { has_outline: true, chapters: [1] } });
+  renderPage(<Reader />, "/p/:name/reader");
+  await screen.findByTestId("reader-prose");
+
+  fireEvent.click(screen.getByTestId("edit-chapter"));
+  const area = screen.getByTestId("edit-area") as HTMLTextAreaElement;
+  expect(area.value).toContain("第 1 章的演示正文。");
+
+  // cancel returns to read mode with the prose intact
+  fireEvent.click(screen.getByTestId("edit-cancel"));
+  expect(screen.queryByTestId("edit-area")).not.toBeInTheDocument();
+  expect(screen.getByTestId("reader-prose")).toBeInTheDocument();
+
+  // edit again and save → PUT with the new content
+  fireEvent.click(screen.getByTestId("edit-chapter"));
+  fireEvent.change(screen.getByTestId("edit-area"), {
+    target: { value: "手写修订后的正文，长度足够保存。" },
+  });
+  fireEvent.click(screen.getByTestId("edit-save"));
+  await waitFor(() => {
+    const call = fetchMock.mock.calls.find(
+      (c) => String(c[0]) === "/api/projects/x/chapters/1" && c[1]?.method === "PUT",
+    );
+    expect(call).toBeDefined();
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      content: "手写修订后的正文，长度足够保存。",
+    });
+  });
 });
 
 // ---------- Reviews page + Trend (T8) ----------
@@ -532,6 +637,80 @@ test("Reviews: empty state when no records; Trend needs ≥2 points; last attemp
   // <2 points → renders nothing
   const { container } = render(<Trend points={[{ x: 1, y: 80 }]} />);
   expect(container.querySelector("svg")).toBeNull();
+});
+
+// ---------- Relationships graph page ----------
+
+const REL_CHARS: CharacterData[] = [
+  {
+    id: "c1", slug: "ara", name: "阿岚", role: "主角", backstory: "b",
+    motivation: "夺回家传怀表", arc: "从逃避到承担", voice_fingerprint: {},
+    mannerisms: [], description_history: [],
+    relationships: { c2: "宿敌，夺走了家传怀表" },
+    state: { emotional_state: "警觉", physical_state: "健康", knowledge_gained: [],
+             relationships_shifted: { c3: "从猜忌转为同盟" }, location_end: "钟楼" },
+  },
+  {
+    id: "c2", slug: "kai", name: "凯恩", role: "反派", backstory: "b",
+    motivation: "垄断时间交易", arc: "堕落加深", voice_fingerprint: {},
+    mannerisms: [], description_history: [], relationships: {},
+    state: { emotional_state: "得意", physical_state: "健康", knowledge_gained: [],
+             relationships_shifted: {}, location_end: "钟楼" },
+  },
+  {
+    id: "c3", slug: "mira", name: "米拉", role: "配角·情报贩子", backstory: "b",
+    motivation: "还清债务", arc: "摇摆后站队", voice_fingerprint: {},
+    mannerisms: [], description_history: [], relationships: {},
+    state: { emotional_state: "犹豫", physical_state: "轻伤", knowledge_gained: [],
+             relationships_shifted: {}, location_end: "钟楼" },
+  },
+];
+
+const REL_BIBLE: Partial<BibleData> = {
+  characters: REL_CHARS,
+  events: [
+    { id: "e1", chapter: 1, characters: ["c1", "c2"], summary: "酒馆对峙" },
+    { id: "e2", chapter: 2, characters: ["c1", "c2", "c3"], summary: "钟楼伏击" },
+  ],
+};
+
+test("buildGraph: weights from co-appearance, labels merged (shift overrides), degrees", () => {
+  const { nodes, edges } = buildGraph({ ...BIBLE_EMPTY, ...REL_BIBLE } as BibleData);
+  const find = (a: string, b: string) =>
+    edges.find((e) => (e.a === a && e.b === b) || (e.a === b && e.b === a));
+  expect(find("c1", "c2")).toMatchObject({ label: "宿敌，夺走了家传怀表", weight: 2 });
+  expect(find("c1", "c3")).toMatchObject({ label: "从猜忌转为同盟", weight: 1 });
+  expect(find("c2", "c3")).toMatchObject({ label: "", weight: 1 }); // co-appearance only
+  expect(nodes.find((n) => n.id === "c1")?.degree).toBe(2);
+  expect(nodes).toHaveLength(3);
+});
+
+test("Relationships: graph renders nodes and edge labels; click shows character card", async () => {
+  stubFetchFor({ bible: REL_BIBLE });
+  renderPage(<Relationships />, "/p/:name/relationships");
+
+  expect(await screen.findByTestId("relation-graph")).toBeInTheDocument();
+  expect(screen.getByTestId("graph-node-c1")).toBeInTheDocument();
+  expect(screen.getByTestId("graph-node-c2")).toBeInTheDocument();
+  expect(screen.getByTestId("graph-node-c3")).toBeInTheDocument();
+  expect(screen.getAllByText("阿岚").length).toBeGreaterThan(0);
+  expect(screen.getByText("宿敌，夺走了家传怀表")).toBeInTheDocument(); // edge label
+  expect(screen.getByText("从猜忌转为同盟")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByTestId("graph-node-c1"));
+  expect(await screen.findByTestId("relation-detail")).toHaveTextContent("夺回家传怀表");
+  expect(screen.getByText("米拉：从猜忌转为同盟")).toBeInTheDocument();
+
+  // click again to deselect
+  fireEvent.click(screen.getByTestId("graph-node-c1"));
+  expect(screen.getByTestId("relation-detail")).toHaveTextContent("点击图谱中的人物查看详情");
+});
+
+test("Relationships: empty state links to setup", async () => {
+  stubFetchFor();
+  renderPage(<Relationships />, "/p/:name/relationships");
+  expect(await screen.findByText("尚无人物设定")).toBeInTheDocument();
+  expect(screen.getByText("去分阶段设定")).toHaveAttribute("href", "/p/x/setup");
 });
 
 // ---------- Threads page (T8) ----------

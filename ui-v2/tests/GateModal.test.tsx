@@ -200,6 +200,18 @@ test("bible:concept gate never opens the global modal", () => {
   expect(screen.queryByTestId("gate-modal")).not.toBeInTheDocument();
 });
 
+test("rewrite:{N} gate never opens the global modal (Reader panel owns it)", () => {
+  stubFetch();
+  renderModal();
+  act(() => {
+    useEvents.getState().apply({
+      type: "gate", gate_id: "g1", label: "rewrite:3", artifact: "draft", job_id: "j1",
+    });
+  });
+  expect(screen.queryByTestId("gate-modal")).not.toBeInTheDocument();
+  expect(useEvents.getState().gate).toBeNull();
+});
+
 test("JSON artifacts are pretty-printed regardless of wire compactness", () => {
   stubFetch();
   renderModal();
@@ -214,4 +226,26 @@ test("JSON artifacts are pretty-printed regardless of wire compactness", () => {
   });
   const text = screen.getByTestId("gate-artifact").textContent ?? "";
   expect(text).toContain('\n  "arcs"');
+});
+
+test("artifacts longer than 4000 chars render in full — no mid-JSON cutoff", () => {
+  stubFetch();
+  renderModal();
+  // A realistic large outline: >4000 chars so the old slice() would cut it
+  const filler = "章节标题占位文本".repeat(600);
+  const artifact = JSON.stringify({ arcs: [{ arc_name: filler }] });
+  expect(artifact.length).toBeGreaterThan(4000);
+  act(() => {
+    useEvents.getState().apply({
+      type: "gate",
+      gate_id: "g12",
+      label: "setup:outline",
+      artifact,
+      job_id: "j1",
+    });
+  });
+  const text = screen.getByTestId("gate-artifact").textContent ?? "";
+  expect(text).toContain(filler);
+  // the tail survives too: pretty JSON ends with the closing brace
+  expect(text.trimEnd().endsWith("}")).toBe(true);
 });

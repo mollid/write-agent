@@ -14,8 +14,21 @@ export function describe(ev: SseEvent): string | null {
         : `${stageName(String(ev.stage))}…`;
     case "chapter_start":
       return `▶ 开始第 ${ev.chapter} 章${ev.title ? `「${ev.title}」` : ""}`;
-    case "review":
-      return `  评审：总分 ${ev.overall}（第 ${ev.attempt} 次尝试）${ev.passed ? "✅ 通过" : "❌ 未达标"}`;
+    case "review": {
+      const base = `  评审：总分 ${ev.overall}（第 ${ev.attempt} 次尝试）`;
+      if (ev.passed) return `${base}✅ 通过`;
+      // pass rule = every dimension >= score_min; list the weak dimensions so
+      // 总分 82 + ❌ never reads as a contradiction
+      const min = Number(ev.score_min);
+      const weak = Number.isFinite(min) && typeof ev.scores === "object" && ev.scores !== null
+        ? Object.entries(ev.scores as Record<string, unknown>)
+            .filter(([, v]) => Number(v) < min)
+            .map(([dim, v]) => `${dim} ${v}`)
+        : [];
+      return weak.length
+        ? `${base}❌ 未达标：${weak.join("、")}（每项需 ≥${min}）`
+        : `${base}❌ 未达标`;
+    }
     case "chapter_done":
       return `✔ 第 ${ev.chapter} 章完成并已保存`;
     case "chapter_skipped":
@@ -39,6 +52,12 @@ export function describe(ev: SseEvent): string | null {
       return "大纲追章方案已生成，等待确认";
     case "outline_extended":
       return `大纲已追加 ${ev.added} 章`;
+    case "chapter_proposal":
+      return `第 ${ev.chapter} 章改写稿已生成，等待确认`;
+    case "rewrite_applied":
+      return `✔ 第 ${ev.chapter} 章已按改写稿更新（旧稿已备份）`;
+    case "rewrite_done":
+      return ev.applied ? "章节改写完成" : "章节改写未应用";
     case "job_end":
       if (ev.status === "done") return "✅ 任务完成";
       if (ev.status === "cancelled") return "任务已取消";

@@ -34,7 +34,8 @@ export function useProjectEvents(project: string | undefined): void {
               type: "gate",
               gate_id: g.id,
               label: g.label,
-              artifact: "",
+              // full artifact so the re-opened GateModal shows the content to approve
+              artifact: g.artifact ?? "",
               job_id: job.id,
             } as SseEvent);
           }
@@ -67,15 +68,16 @@ export function useProjectEvents(project: string | undefined): void {
           if (ev.type === "premise_done" || ev.type === "setup_stage" || ev.type === "job_end") {
             void qc.invalidateQueries({ queryKey: ["status"] });
           }
-          if (
-            ev.type === "bible_applied" ||
-            ev.type === "outline_extended" ||
-            ev.type === "job_end"
-          ) {
+          if (ev.type === "bible_applied" || ev.type === "outline_extended" ||
+              ev.type === "rewrite_applied" || ev.type === "rewrite_done" ||
+              ev.type === "job_end") {
             void qc.invalidateQueries({ queryKey: ["bible"] });
           }
-          if (ev.type === "outline_extended" || ev.type === "job_end") {
+          if (ev.type === "outline_extended" || ev.type === "rewrite_applied" ||
+              ev.type === "rewrite_done" || ev.type === "job_end") {
             void qc.invalidateQueries({ queryKey: ["outline"] });
+            void qc.invalidateQueries({ queryKey: ["chapters"] });
+            void qc.invalidateQueries({ queryKey: ["status"] });
           }
         } catch {
           /* ignore */

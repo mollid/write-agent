@@ -207,9 +207,20 @@ function handleEvent(m) {
       log(`▶ 开始第 ${m.chapter} 章${m.title ? `「${m.title}」` : ""}`);
       setStatus(`第 ${m.chapter} 章 · 写作中…`);
       break;
-    case "review":
-      log(`  评审：总分 ${m.overall}（第 ${m.attempt} 次尝试）${m.passed ? "✅ 通过" : "❌ 未达标"}`);
+    case "review": {
+      const base = `  评审：总分 ${m.overall}（第 ${m.attempt} 次尝试）`;
+      if (m.passed) { log(`${base}✅ 通过`); break; }
+      // pass rule = every dimension >= score_min; list the weak dimensions
+      const min = Number(m.score_min);
+      const weak = Number.isFinite(min) && m.scores && typeof m.scores === "object"
+        ? Object.entries(m.scores).filter(([, v]) => Number(v) < min)
+            .map(([dim, v]) => `${dim} ${v}`)
+        : [];
+      log(weak.length
+        ? `${base}❌ 未达标：${weak.join("、")}（每项需 ≥${min}）`
+        : `${base}❌ 未达标`);
       break;
+    }
     case "chapter_done":
       state.doneChapters += 1;
       setProgress(state.targetChapters ? state.doneChapters / state.targetChapters : 1);
@@ -264,7 +275,7 @@ function showGate(m) {
   } else {
     $("gate-label").textContent = GATE_LABELS[m.label] || m.label;
   }
-  $("gate-artifact").textContent = (m.artifact || "").slice(0, 4000);
+  $("gate-artifact").textContent = m.artifact || "";
   const isSetup = String(m.label).startsWith("setup:");
   $("gate-feedback").hidden = !isSetup;
   $("gate-feedback").value = "";

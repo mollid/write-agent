@@ -225,3 +225,31 @@ export function useOutlineExtend(name: string) {
     },
   });
 }
+
+export function useChapterRewrite(name: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { chapter: number; mode: string; instruction: string }) =>
+      api<{ job_id: string }>(`${p(name)}/chapter-rewrite`, {
+        method: "POST",
+        body: JSON.stringify(vars),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["status", name] });
+    },
+  });
+}
+
+export function useSaveChapter(name: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { chapter: number; content: string }) =>
+      api<{ ok: boolean; backup: string }>(`${p(name)}/chapters/${vars.chapter}`, {
+        method: "PUT",
+        body: JSON.stringify({ content: vars.content }),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["chapters", name] });
+    },
+  });
+}

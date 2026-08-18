@@ -29,7 +29,7 @@ export interface JobInfo {
   status: string;
   error: string | null;
   project: string;
-  gates: { id: string; label: string }[];
+  gates: { id: string; label: string; artifact: string }[];
 }
 export interface OutlineInfo {
   arcs: { arc_name: string; chapters: { chapter_no: number; chapter_title: string }[] }[];

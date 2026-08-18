@@ -100,3 +100,26 @@ test("reconcile clears a stale gate when the job has no pending gates", async ()
   unmount();
   vi.unstubAllGlobals();
 });
+
+test("reconcile re-applies pending gates with their artifact (reload keeps modal content)", async () => {
+  instances.length = 0;
+  stubFetch(
+    { job: { id: "j1", kind: "setup", status: "running", error: null } },
+    {
+      id: "j1", kind: "setup", status: "running", error: null, project: "x",
+      gates: [{ id: "g1", label: "setup:outline", artifact: '{"arcs":[]}' }],
+    },
+  );
+  vi.stubGlobal("EventSource", FakeES as unknown as typeof EventSource);
+
+  const { unmount } = renderHook(() => useProjectEvents("x"), { wrapper });
+  await act(async () => {
+    instances[0].onopen?.(); // first connect → reconcile
+  });
+  const gate = useEvents.getState().gate;
+  expect(gate?.id).toBe("g1");
+  expect(gate?.artifact).toBe('{"arcs":[]}'); // not "" — artifact survives the reload
+
+  unmount();
+  vi.unstubAllGlobals();
+});

@@ -44,7 +44,9 @@ export default function GateModal({ project }: { project: string }) {
     }
   }, [gate]);
 
-  if (!gate || dismissed || gate.label.startsWith("bible:")) return null;
+  if (!gate || dismissed || gate.label.startsWith("bible:") ||
+      gate.label.startsWith("rewrite:"))
+    return null;
   const isSetup = gate.label.startsWith("setup:");
   const isForce = gate.label === "chapter_review_failed";
   const title = isSetup
@@ -88,8 +90,8 @@ export default function GateModal({ project }: { project: string }) {
           <Link to={`/p/${project}/reader?chapter=${gate.artifact.trim()}`}>查看本章</Link>）
         </Typography.Paragraph>
       ) : gate.artifact ? (
-        <pre data-testid="gate-artifact" style={{ whiteSpace: "pre-wrap", maxHeight: 320, overflow: "auto" }}>
-          {prettyArtifact(gate.artifact.slice(0, 4000))}
+        <pre data-testid="gate-artifact" style={{ whiteSpace: "pre-wrap", maxHeight: "60vh", overflow: "auto" }}>
+          {prettyArtifact(gate.artifact)}
         </pre>
       ) : (
         <Typography.Text type="secondary">（产物内容不可用——重连恢复的审批）</Typography.Text>
