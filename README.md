@@ -253,7 +253,7 @@ uv run novel write-chapter 2
 直接编辑 `chapters/NNN.md` **不会**自动同步角色状态、事件与伏笔（extractor 只在管线写作时运行）。
 系统在每次写作任务启动时会校验章节文件哈希（记录于 `chapters/_summaries/NNN.json` 的
 `prose_sha256`），不一致时在 UI 发出警告，但**不会自动重算状态**。需要状态重建时，
-请重写该章（Reader 页改写功能会走完整回写），或等待后续的 backfill 工具。
+请删除该章后用管线重新生成（会走完整回写并刷新摘要哈希），或等待后续的 backfill 工具。
 
 ### 4. 查看故事线索
 
@@ -352,7 +352,7 @@ generation:
 | `generation.context_token_budget` | 每章工作记忆的上下文 Token 预算，默认 `24000`。 |
 | `generation.min_chapter_chars` | 断点续跑时判定章节「已完成」的最小字符数，默认 `50`（必须低于演示模式章节长度 62）。真实模型项目建议设为实际章节长度的下限（如 `2000`）；设得过大会导致同一章每次续跑都被重写。 |
 | `generation.human_gate_every_n_chapters` | 人工审核频率配置；当前实现会在真实模式的大纲与每章阶段请求批准。 |
-| `generation.target_chapters` | 计划全书总章数；设置后 setup 走两段式大纲（卷骨架 + 按卷明细），留空保持单次全量出纲 | `None`（留空） |
+| `generation.target_chapters` | 计划全书总章数；设置后写作流程（write-chapter / 界面「生成章节」的内部 setup）走两段式大纲（卷骨架 + 按卷明细）；留空保持单次全量出纲。引导式 `setup` 命令当前仍为单次出纲 | `None`（留空） |
 | `generation.chapter_target_length` | 每章目标长度（zh=字 / en=词），注入写手提示词 | `2500` |
 | `generation.arc_detail_lookahead` | 自动续纲提前量：已明细章节不足该值时自动生成下一卷明细（强剧情可调大） | `5` |
 | `language` | 输出语言开关，`en`（默认）或 `zh`。真实模式下所有智能体按此语言生成自然语言文本。 |

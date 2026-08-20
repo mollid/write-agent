@@ -20,7 +20,7 @@ For a no-LLM smoke run, omit `NOVEL_LIVE=1` (demo mode uses canned responses).
 验证长文（10 卷 +）能力。以目标全书 240 章为例：
 
 1. 在 `project.config.yaml` 的 `generation` 段配置 `target_chapters: 240`（可配 `chapter_target_length` 与 `arc_detail_lookahead`）。
-2. 两段式大纲：先由 setup 生成全书卷骨架，再按卷生成明细。
+2. 两段式大纲：直接运行 `write-chapter`（其内部 setup 会先由卷规划器生成全书卷骨架，再按卷生成明细）。不要用引导式 `setup` 命令——它当前不读取 `target_chapters`，只做单次全量出纲。
 3. 试跑第一卷：`NOVEL_LIVE=1 uv run novel write-chapter 20`。
 
 检查项：
