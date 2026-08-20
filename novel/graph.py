@@ -12,7 +12,7 @@ from novel.agents.writer import WriterAgent
 from novel.config import ModelConfig
 from novel.memory.assembler import RECENT_SUMMARY_K, assemble_context, continuity_compact_view
 from novel.memory.extractor import extract_updates
-from novel.memory.summarizer import summarize_chapter
+from novel.memory.summarizer import digest_book, summarize_arc, summarize_chapter
 from novel.models import ChapterOutline, ChapterSummary, ReviewRecord, ReviewScore
 from novel.project import NovelProject
 from novel.providers import ModelProvider
@@ -74,7 +74,8 @@ def run_full_pipeline(
             if stage_done(stage, bible):
                 continue  # half-finished guided setup: only fill the gaps
             artifact = generate_stage(stage, provider=provider, cfg_map=cfg_map,
-                                      bible=bible, premise=premise)
+                                      bible=bible, premise=premise,
+                                      target_chapters=planned_total)
             approve_stage(stage, artifact, bible)
         outline = bible.get_outline()
         assert outline is not None
@@ -101,6 +102,26 @@ def run_full_pipeline(
     # chapter k on disk must be written from the k-th outline chapter. On resume,
     # skip positions < start_chapter instead of restarting the outline from the top.
     summaries = SummaryStore(proj)
+
+    def detail_next_arc() -> bool:
+        """Rolling outline (spec §4.3): detail the next skeleton. Returns False
+        when the live-mode gate denied it (skeleton goes back, run continues)."""
+        assert outline is not None and outline.arc_plan
+        skeleton = outline.arc_plan.pop(0)
+        emit({"type": "stage", "stage": "arc_detail", "arc": skeleton.arc_name})
+        if on_gate and not on_gate("arc_detail", skeleton):
+            outline.arc_plan.insert(0, skeleton)
+            return False
+        prev_name = outline.arcs[-1].arc_name if outline.arcs else ""
+        prev_arc = summaries.get_arc_summary(prev_name) if prev_name else None
+        existing_max = max((c.chapter_no for a in outline.arcs for c in a.chapters), default=0)
+        from novel.setup_flow import _detail_arc
+        arc = _detail_arc(provider, cfg_map, bible, skeleton, prev_arc, existing_max + 1)
+        outline.arcs.append(arc)
+        bible.set_outline(outline)
+        emit({"type": "arc_detailed", "arc": skeleton.arc_name,
+              "chapters": len(arc.chapters)})
+        return True
 
     # user contract (spec §5): manual prose edits that bypassed the pipeline are
     # detected (hash mismatch) and reported — state is NOT auto-rebuilt
@@ -143,118 +164,146 @@ def run_full_pipeline(
             break
         arc_name, ch_out = flat[idx]
         chapter_no = idx + 1
+        while outline.arc_plan and len(flat) - (idx + 1) < arc_lookahead:
+            if not detail_next_arc():
+                break
+            flat = flat_chapters()
         _backfill_prev_summary(chapter_no)
         if is_chapter_complete(proj, reviews, chapter_no, min_chapter_chars):
             emit({"type": "chapter_skipped", "chapter": chapter_no,
                   "reason": "already complete"})
-            idx += 1
-            continue
-        beats = ch_out.beats
-        assert beats, f"chapter {chapter_no} has no beat"
-        emit({"type": "chapter_start", "chapter": chapter_no, "title": ch_out.chapter_title,
-              "planned_total": planned_total})
-        arc_sum = summaries.get_arc_summary(arc_name)
-        recent = summaries.recent_chapter_summaries(upto=chapter_no - 1, k=RECENT_SUMMARY_K)
-        digest = summaries.get_book_digest()
-        ctx = assemble_context(
-            beats=beats, bible=bible, vector=vector, proj=proj, token_budget=token_budget,
-            chapter_no=chapter_no,
-            arc_summary=arc_sum.summary if arc_sum else "",
-            recent_summaries=[f"ch{cs.chapter_no}: {cs.summary}" for cs in recent],
-            book_digest=digest.summary if digest else "",
-            target_note=_target_note())
-        writer = WriterAgent(provider, agent("writer"))
-        prose = writer.run(ctx)
-        # scorer loop on chapter
-        attempt = 1
-        final_ok = False
-        while True:
-            emit({"type": "stage", "stage": "scorer", "chapter": chapter_no, "attempt": attempt})
-            ok, rs = _scored(prose, "chapter",
-                             json.dumps({"prose": prose,
-                                         "beats": [b.model_dump() for b in beats]},
-                                        ensure_ascii=False),
-                             scorer, score_min, max_retries, attempt)
-            state.last_review = rs
-            reviews.append(ReviewRecord(
-                chapter=chapter_no, attempt=attempt, artifact_type=rs.artifact_type,
-                overall=rs.overall, summary=rs.summary, scores=rs.scores, passed=ok,
-                timestamp=datetime.now(UTC).isoformat()))
-            if not ok:
-                # persist the below-threshold dimensions so later chapters'
-                # writer context warns against repeating them
-                notes.add_weak(chapter_no, {
-                    name: (ds.score, ds.critique)
-                    for name, ds in rs.scores.items() if ds.score < score_min})
-            emit({"type": "review", "chapter": chapter_no, "attempt": attempt,
-                  "passed": ok, "overall": rs.overall,
-                  # pass rule is EVERY dimension >= score_min: ship the
-                  # per-dimension scores + threshold so the GUI log can
-                  # explain why overall 82 may still fail
-                  "scores": {name: ds.score for name, ds in rs.scores.items()},
-                  "score_min": score_min})
-            if ok:
-                final_ok = True
-                break
-            if attempt >= max_retries:
-                break
-            feedback = apply_review(rs, prose)
-            emit({"type": "stage", "stage": "writer_rewrite", "chapter": chapter_no, "attempt": attempt})
-            prose = writer.run(type(ctx)(blocks=ctx.blocks + [f"[REWRITE NOTES] {feedback}"]))
-            attempt += 1
-        if not final_ok:
-            approved = on_gate("chapter_review_failed", rs) if on_gate else False
-            if not approved:
-                state.error = f"chapter {chapter_no} rejected after {max_retries} attempts"
-                emit({"type": "chapter_skipped", "chapter": chapter_no, "reason": state.error})
-                idx += 1
-                continue
-            # the human shipped this failing chapter: persist a passed record
-            # so resume (is_chapter_complete) treats it as complete
-            reviews.append(ReviewRecord(
-                chapter=chapter_no, attempt=attempt, artifact_type=rs.artifact_type,
-                overall=rs.overall, summary=f"human override: {rs.summary}",
-                scores=rs.scores, passed=True,
-                timestamp=datetime.now(UTC).isoformat()))
-        # continuity — compact view replaces the whole canonical JSON (spec §4.5)
-        emit({"type": "stage", "stage": "continuity", "chapter": chapter_no})
-        compact = continuity_compact_view(
-            beats=beats, bible=bible,
-            arc_summary=arc_sum.summary if arc_sum else "",
-            recent_summaries=[f"ch{cs.chapter_no}: {cs.summary}" for cs in recent],
-            book_digest=digest.summary if digest else "")
-        issues = ContinuityAgent(provider, agent("continuity")).run((prose, compact))
-        if issues:
-            emit({"type": "stage", "stage": "editor", "chapter": chapter_no})
-            prose = EditorAgent(provider, agent("editor")).run(prose)
-        # extract + apply in ONE batched bible write (spec §4.4)
-        emit({"type": "stage", "stage": "extractor", "chapter": chapter_no})
-        involved_ids: list[str] = []
-        for b in beats:
-            for cid in b.characters:
-                if cid not in involved_ids:
-                    involved_ids.append(cid)
-        involved = [c for c in (bible.get_character(i) for i in involved_ids) if c is not None]
-        upd = extract_updates(chapter_no, prose, involved, provider, agent("extractor"))
-        bible.apply_chapter_updates(chapter_no, upd, beats)
-        summaries.put_chapter_summary(ChapterSummary(
-            chapter_no=chapter_no, arc_name=arc_name,
-            summary=(upd.chapter_summary or prose[:300]).strip(),
-            characters_involved=list(upd.character_states.keys()),
-            threads_advanced=upd.threads_advanced,
-            prose_sha256=sha256_text(prose)))
-        vector.add_chapter(chapter_no, prose)
-        vector.add_summary("chapter", f"ch{chapter_no}", upd.chapter_summary or prose[:300])
-        # atomic write last: the file's appearance is the chapter's commit point
-        # (score gate, extraction, bible, summaries and memory updates are all on disk already)
-        chapters_dir = proj.root / "chapters"
-        tmp = chapters_dir / f".{chapter_no:03d}.md.tmp"
-        tmp.write_text(prose, encoding="utf-8")
-        tmp.replace(chapters_dir / f"{chapter_no:03d}.md")
-        emit({"type": "chapter_done", "chapter": chapter_no, "planned_total": planned_total})
-        state.written.append(chapter_no)
-        if on_gate and gate_every_n > 0 and chapter_no % gate_every_n == 0:
-            on_gate("chapter", chapter_no)
+        else:
+            beats = ch_out.beats
+            assert beats, f"chapter {chapter_no} has no beat"
+            emit({"type": "chapter_start", "chapter": chapter_no, "title": ch_out.chapter_title,
+                  "planned_total": planned_total})
+            arc_sum = summaries.get_arc_summary(arc_name)
+            recent = summaries.recent_chapter_summaries(upto=chapter_no - 1, k=RECENT_SUMMARY_K)
+            digest = summaries.get_book_digest()
+            ctx = assemble_context(
+                beats=beats, bible=bible, vector=vector, proj=proj, token_budget=token_budget,
+                chapter_no=chapter_no,
+                arc_summary=arc_sum.summary if arc_sum else "",
+                recent_summaries=[f"ch{cs.chapter_no}: {cs.summary}" for cs in recent],
+                book_digest=digest.summary if digest else "",
+                target_note=_target_note())
+            writer = WriterAgent(provider, agent("writer"))
+            prose = writer.run(ctx)
+            # scorer loop on chapter
+            attempt = 1
+            final_ok = False
+            while True:
+                emit({"type": "stage", "stage": "scorer", "chapter": chapter_no, "attempt": attempt})
+                ok, rs = _scored(prose, "chapter",
+                                 json.dumps({"prose": prose,
+                                             "beats": [b.model_dump() for b in beats]},
+                                            ensure_ascii=False),
+                                 scorer, score_min, max_retries, attempt)
+                state.last_review = rs
+                reviews.append(ReviewRecord(
+                    chapter=chapter_no, attempt=attempt, artifact_type=rs.artifact_type,
+                    overall=rs.overall, summary=rs.summary, scores=rs.scores, passed=ok,
+                    timestamp=datetime.now(UTC).isoformat()))
+                if not ok:
+                    # persist the below-threshold dimensions so later chapters'
+                    # writer context warns against repeating them
+                    notes.add_weak(chapter_no, {
+                        name: (ds.score, ds.critique)
+                        for name, ds in rs.scores.items() if ds.score < score_min})
+                emit({"type": "review", "chapter": chapter_no, "attempt": attempt,
+                      "passed": ok, "overall": rs.overall,
+                      # pass rule is EVERY dimension >= score_min: ship the
+                      # per-dimension scores + threshold so the GUI log can
+                      # explain why overall 82 may still fail
+                      "scores": {name: ds.score for name, ds in rs.scores.items()},
+                      "score_min": score_min})
+                if ok:
+                    final_ok = True
+                    break
+                if attempt >= max_retries:
+                    break
+                feedback = apply_review(rs, prose)
+                emit({"type": "stage", "stage": "writer_rewrite", "chapter": chapter_no,
+                      "attempt": attempt})
+                prose = writer.run(type(ctx)(blocks=ctx.blocks + [f"[REWRITE NOTES] {feedback}"]))
+                attempt += 1
+            if not final_ok:
+                approved = on_gate("chapter_review_failed", rs) if on_gate else False
+                if not approved:
+                    state.error = f"chapter {chapter_no} rejected after {max_retries} attempts"
+                    emit({"type": "chapter_skipped", "chapter": chapter_no,
+                          "reason": state.error})
+                    idx += 1
+                    continue
+                # the human shipped this failing chapter: persist a passed record
+                # so resume (is_chapter_complete) treats it as complete
+                reviews.append(ReviewRecord(
+                    chapter=chapter_no, attempt=attempt, artifact_type=rs.artifact_type,
+                    overall=rs.overall, summary=f"human override: {rs.summary}",
+                    scores=rs.scores, passed=True,
+                    timestamp=datetime.now(UTC).isoformat()))
+            # continuity — compact view replaces the whole canonical JSON (spec §4.5)
+            emit({"type": "stage", "stage": "continuity", "chapter": chapter_no})
+            compact = continuity_compact_view(
+                beats=beats, bible=bible,
+                arc_summary=arc_sum.summary if arc_sum else "",
+                recent_summaries=[f"ch{cs.chapter_no}: {cs.summary}" for cs in recent],
+                book_digest=digest.summary if digest else "")
+            issues = ContinuityAgent(provider, agent("continuity")).run((prose, compact))
+            if issues:
+                emit({"type": "stage", "stage": "editor", "chapter": chapter_no})
+                prose = EditorAgent(provider, agent("editor")).run(prose)
+            # extract + apply in ONE batched bible write (spec §4.4)
+            emit({"type": "stage", "stage": "extractor", "chapter": chapter_no})
+            involved_ids: list[str] = []
+            for b in beats:
+                for cid in b.characters:
+                    if cid not in involved_ids:
+                        involved_ids.append(cid)
+            involved = [c for c in (bible.get_character(i) for i in involved_ids) if c is not None]
+            upd = extract_updates(chapter_no, prose, involved, provider, agent("extractor"))
+            bible.apply_chapter_updates(chapter_no, upd, beats)
+            summaries.put_chapter_summary(ChapterSummary(
+                chapter_no=chapter_no, arc_name=arc_name,
+                summary=(upd.chapter_summary or prose[:300]).strip(),
+                characters_involved=list(upd.character_states.keys()),
+                threads_advanced=upd.threads_advanced,
+                prose_sha256=sha256_text(prose)))
+            vector.add_chapter(chapter_no, prose)
+            vector.add_summary("chapter", f"ch{chapter_no}", upd.chapter_summary or prose[:300])
+            # atomic write last: the file's appearance is the chapter's commit point
+            # (score gate, extraction, bible, summaries and memory updates are all on disk already)
+            chapters_dir = proj.root / "chapters"
+            tmp = chapters_dir / f".{chapter_no:03d}.md.tmp"
+            tmp.write_text(prose, encoding="utf-8")
+            tmp.replace(chapters_dir / f"{chapter_no:03d}.md")
+            emit({"type": "chapter_done", "chapter": chapter_no, "planned_total": planned_total})
+            state.written.append(chapter_no)
+            if on_gate and gate_every_n > 0 and chapter_no % gate_every_n == 0:
+                on_gate("chapter", chapter_no)
+        # arc boundary (spec §4.1): next detailed chapter absent or in another volume
+        nxt = flat[chapter_no] if chapter_no < len(flat) else None
+        if nxt is None or nxt[0] != arc_name:
+            try:
+                if summaries.get_arc_summary(arc_name) is None:
+                    arc_start = next(i + 1 for i, (an, _c) in enumerate(flat) if an == arc_name)
+                    chapter_sums = [cs for cs in (
+                        summaries.get_chapter_summary(n)
+                        for n in range(arc_start, chapter_no + 1)) if cs]
+                    if chapter_sums:
+                        prev_arcs = [a for a in summaries.all_arc_summaries()
+                                     if a.chapter_end < arc_start]
+                        arc_sum = summarize_arc(arc_name, arc_start, chapter_no, chapter_sums,
+                                                prev_arcs[-1] if prev_arcs else None,
+                                                provider, agent("extractor"))
+                        summaries.put_arc_summary(arc_sum)
+                        digest = digest_book(summaries.all_arc_summaries(), chapter_no, arc_name,
+                                             provider, agent("extractor"))
+                        summaries.put_book_digest(digest)
+                        emit({"type": "arc_summary_done", "arc": arc_name,
+                              "chapter_end": chapter_no})
+            except Exception:  # noqa: BLE001 - a failed arc summary must not kill a long run
+                emit({"type": "warning", "warning": "arc_summary_failed", "arc": arc_name})
         idx += 1
     total_outline = len(flat_chapters())
     if not state.error and target_chapters > total_outline:

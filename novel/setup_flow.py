@@ -9,11 +9,21 @@ from __future__ import annotations
 import re
 
 from novel.agents.character import CharacterAgent
-from novel.agents.outliner import OutlinerAgent
+from novel.agents.outliner import ArcDetailerAgent, ArcDetailInput, ArcPlannerAgent, OutlinerAgent
 from novel.agents.strategist import StrategistAgent
 from novel.agents.worldbuilder import WorldbuilderAgent
 from novel.config import ModelConfig
-from novel.models import Character, Concept, Foreshadow, ForeshadowStatus, Outline, World
+from novel.models import (
+    Arc,
+    ArcSkeleton,
+    ArcSummary,
+    Character,
+    Concept,
+    Foreshadow,
+    ForeshadowStatus,
+    Outline,
+    World,
+)
 from novel.providers import ModelProvider
 from novel.store.bible import StoryBible
 
@@ -40,7 +50,8 @@ def stage_done(stage: str, bible: StoryBible) -> bool:
 
 def generate_stage(stage: str, *, provider: ModelProvider, cfg_map: dict[str, ModelConfig],
                    bible: StoryBible, premise: str = "",
-                   feedback: list[str] | None = None) -> object:
+                   feedback: list[str] | None = None,
+                   target_chapters: int | None = None) -> object:
     """Run the stage's agent WITHOUT persisting anything. Inputs come from the bible."""
     fb = list(feedback or [])
     if stage == "concept":
@@ -60,9 +71,48 @@ def generate_stage(stage: str, *, provider: ModelProvider, cfg_map: dict[str, Mo
         concept = bible.get_concept()
         world = bible.get_world()
         assert concept is not None and world is not None, "concept+world required"
+        if target_chapters:
+            return generate_two_phase_outline(provider=provider, cfg_map=cfg_map,
+                                               bible=bible, target_chapters=target_chapters)
         return OutlinerAgent(provider, cfg_map["outliner"]).run(
             (concept, world, list(bible.all_characters())), feedback=fb)
     raise ValueError(f"unknown setup stage: {stage}")
+
+
+def generate_two_phase_outline(*, provider: ModelProvider, cfg_map: dict[str, ModelConfig],
+                               bible: StoryBible, target_chapters: int) -> Outline:
+    """Volume skeletons first, then only the FIRST volume detailed (spec §4.3).
+    Outline.arc_plan keeps the not-yet-detailed skeletons as a queue."""
+    concept = bible.get_concept()
+    world = bible.get_world()
+    assert concept is not None and world is not None, "concept+world required"
+    roster = list(bible.all_characters())
+    plan = ArcPlannerAgent(provider, cfg_map["outliner"]).run((concept, world, roster, target_chapters))
+    assert plan.arcs, "arc planner returned no volumes"
+    existing_max = 0
+    arc = _detail_arc(provider, cfg_map, bible, plan.arcs[0], prev_arc=None,
+                      next_chapter_no=existing_max + 1)
+    outline = Outline(arcs=[arc], arc_plan=plan.arcs[1:])
+    merge_foreshadow_ledger(outline, bible)
+    return outline
+
+
+def _detail_arc(provider: ModelProvider, cfg_map: dict[str, ModelConfig],
+                bible: StoryBible, skeleton: ArcSkeleton, prev_arc: ArcSummary | None,
+                next_chapter_no: int) -> Arc:
+    concept = bible.get_concept()
+    world = bible.get_world()
+    assert concept is not None and world is not None, "concept+world required"
+    arc = ArcDetailerAgent(provider, cfg_map["outliner"]).run(ArcDetailInput(
+        skeleton=skeleton, concept=concept, world=world,
+        characters=list(bible.all_characters()), prev_arc=prev_arc,
+        open_foreshadows=[f for f in bible.list_foreshadow()
+                          if f.status == ForeshadowStatus.OPEN],
+        recent_summaries=[], next_chapter_no=next_chapter_no))
+    # defensive renumbering: model output numbers are advisory only (spec §4.3)
+    for i, ch in enumerate(arc.chapters):
+        ch.chapter_no = next_chapter_no + i
+    return arc
 
 
 def merge_foreshadow_ledger(outline: Outline, bible: StoryBible) -> None:

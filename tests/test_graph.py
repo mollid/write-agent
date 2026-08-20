@@ -2,6 +2,7 @@ from novel.config import load_config
 from novel.graph import run_full_pipeline
 from novel.models import (
     Arc,
+    ArcSkeleton,
     ChapterBeat,
     ChapterOutline,
     Character,
@@ -454,6 +455,15 @@ def test_gate_every_n_skips_intermediate_chapters(tmp_path):
 
 def test_chapter_events_carry_planned_total(tmp_path):
     proj, bible, vector, provider = _two_chapter_arc_setup(tmp_path)
+    # planned_total routes one-shot SETUP's outline stage through the two-phase
+    # path (generate_stage target_chapters), so it needs the arc planner+detailer
+    provider.responses["arc_planner"] = {
+        "arcs": [{"arc_name": "卷一", "chapter_start": 1, "chapter_end": 2, "premise": "p1"}],
+        "planned_total_chapters": 240}
+    provider.responses["arc_detailer"] = {"arc_name": "卷一", "chapters": [
+        {"chapter_no": 1, "chapter_title": "T1",
+         "beats": [{"pov": "Ara", "setting": "t", "event": "event-1", "emotional_turn": "d",
+                    "characters": ["c1"]}]}]}
     events: list[dict[str, object]] = []
     run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
                       proj=proj, premise="a thief", target_chapters=1, planned_total=240,
@@ -476,3 +486,55 @@ def test_edited_chapter_hash_warning(tmp_path):
     assert state2.error is None
     warn = [e for e in events if e["type"] == "warning" and e["warning"] == "chapter_edited"]
     assert warn and warn[0]["chapter"] == 1
+
+
+class _ArcSequenceProvider(_RecordingWriterProvider):
+    """FakeProvider serving queued arc_detailer responses in call order."""
+
+    def __init__(self, responses, arcs):
+        super().__init__(responses)
+        self._arcs = list(arcs)
+
+    def _lookup(self, messages):
+        from novel.providers import _agent_tag
+        if _agent_tag(messages, self.tag_key) == "arc_detailer":
+            return self._arcs.pop(0)
+        return super()._lookup(messages)
+
+
+def test_auto_extend_details_next_arc_and_arc_summary(tmp_path):
+    from novel.store.summaries import SummaryStore
+    proj, bible, vector, concept, _beat, _o, chars = _one_chapter_setup(tmp_path)
+    beat = ChapterBeat(pov="Ara", setting="t", event="e", emotional_turn="d", characters=["c1"])
+    skeleton_outline = Outline(
+        arcs=[Arc(arc_name="卷一", chapters=[
+            ChapterOutline(chapter_no=i, chapter_title=f"T{i}", beats=[beat]) for i in (1, 2)])],
+        arc_plan=[ArcSkeleton(arc_name="卷二", chapter_start=3, chapter_end=4, premise="p2")])
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
+    arc2 = Arc(arc_name="卷二", chapters=[
+        ChapterOutline(chapter_no=99, chapter_title="T3", beats=[beat]),   # wrong numbers on purpose
+        ChapterOutline(chapter_no=100, chapter_title="T4", beats=[beat])])
+    provider = _ArcSequenceProvider({
+        "strategist": concept, "worldbuilder": World(setting="city"), "character": chars,
+        "outliner": skeleton_outline, "writer": "Chapter prose text.", "continuity": "[]",
+        "editor": "x", "scorer": passing,
+        "extractor": {"character_states": {}, "voice_samples": {}, "mannerisms_used": {},
+                      "key_events": [], "threads_advanced": [], "new_information_revealed": [],
+                      "chapter_summary": "摘要。"},
+        "summarizer": {"arc_name": "卷一", "chapter_start": 1, "chapter_end": 2,
+                       "summary": "卷一摘要。", "major_developments": []},
+        "digestor": {"chapter_count": 2, "current_arc": "卷一", "summary": "全书梗概。"},
+    }, arcs=[arc2])
+    state = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                              proj=proj, premise="a thief", target_chapters=4, arc_lookahead=2)
+    assert state.error is None and state.written == [1, 2, 3, 4]
+    outline = bible.get_outline()
+    assert [a.arc_name for a in outline.arcs] == ["卷一", "卷二"]
+    assert outline.arc_plan == []
+    # defensive renumbering: canned 99/100 became 3/4
+    assert [c.chapter_no for c in outline.arcs[1].chapters] == [3, 4]
+    assert (proj.root / "chapters" / "003.md").exists()
+    store = SummaryStore(proj)
+    assert store.get_arc_summary("卷一").summary == "卷一摘要。"
+    assert store.get_book_digest().summary == "全书梗概。"

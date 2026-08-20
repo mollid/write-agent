@@ -74,6 +74,42 @@ def test_unknown_stage_raises(tmp_path):
         generate_stage("nope", provider=demo_provider(), cfg_map=_cfg_map(), bible=bible)
 
 
+def test_generate_outline_two_phase_when_target_chapters_set(tmp_path):
+    from novel.config import ModelConfig
+    from novel.memory.extractor import ChapterUpdates  # noqa: F401  (fixture symmetry)
+    from novel.models import Character, Concept, World
+    from novel.project import NovelProject
+    from novel.providers import FakeProvider
+    from novel.setup_flow import generate_stage
+    from novel.store.bible import StoryBible
+
+    proj = NovelProject.scaffold("n", genre="g", root=tmp_path)
+    bible = StoryBible(proj)
+    bible.set_concept(Concept(logline="L", genre="g", tone="t", target_length_words=9000, audience="a"))
+    bible.set_world(World(setting="city"))
+    bible.upsert_character(Character(id="c1", slug="ara", name="Ara", role="protagonist",
+                                     backstory="b", motivation="m", arc="a"))
+    cfg_map = {n: ModelConfig("zhipu", "x") for n in
+               ("strategist", "worldbuilder", "character", "outliner", "writer",
+                "continuity", "editor", "scorer", "extractor")}
+    provider = FakeProvider({
+        "arc_planner": {"arcs": [
+            {"arc_name": "卷一", "chapter_start": 1, "chapter_end": 2, "premise": "p1"},
+            {"arc_name": "卷二", "chapter_start": 3, "chapter_end": 4, "premise": "p2"}],
+            "planned_total_chapters": 4},
+        "arc_detailer": {"arc_name": "卷一", "chapters": [
+            {"chapter_no": 1, "chapter_title": "T1",
+             "beats": [{"pov": "c1", "setting": "s", "event": "e1",
+                        "emotional_turn": "d", "characters": ["c1"]}]},
+            {"chapter_no": 2, "chapter_title": "T2",
+             "beats": [{"pov": "c1", "setting": "s", "event": "e2",
+                        "emotional_turn": "d", "characters": ["c1"]}]}]}})
+    outline = generate_stage("outline", provider=provider, cfg_map=cfg_map, bible=bible,
+                             target_chapters=4)
+    assert [a.arc_name for a in outline.arcs] == ["卷一"]
+    assert [s.arc_name for s in outline.arc_plan] == ["卷二"]   # 待明细骨架队列
+
+
 def test_pipeline_skips_setup_when_outline_exists(tmp_path):
     """One-shot SETUP must not rerun when the bible already has settings (standard mode)."""
     from novel.graph import run_full_pipeline
