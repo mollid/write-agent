@@ -3,7 +3,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from novel.agents.base import Agent
-from novel.models import Character, Concept, Event, Foreshadow, Outline, World
+from novel.models import (
+    Arc,
+    ArcPlan,
+    ArcSkeleton,
+    ArcSummary,
+    ChapterSummary,
+    Character,
+    Concept,
+    Event,
+    Foreshadow,
+    Outline,
+    World,
+)
 
 OUTLINER_SYSTEM = """\
 You are a story architect who thinks in three-act structure, Save-the-Cat beats, and scene/sequel rhythm. You are obsessive about foreshadowing integrity.
@@ -168,6 +180,184 @@ class OutlinerExtendAgent(Agent[OutlineExtendInput, Outline]):
             n_chapters=inputs.n_chapters,
             next_chapter_no=next_no,
         )
+        return [
+            {"role": "system", "agent": self.name, "content": system},
+            {"role": "user", "agent": self.name, "content": user},
+        ]
+
+
+ARC_PLANNER_SYSTEM = """\
+You are a story architect planning a LONG novel (hundreds of chapters) volume by volume.
+
+## Task
+Produce a volume skeleton plan (卷级骨架): a list of arcs covering the WHOLE book.
+
+## Output Schema (strict JSON)
+{
+  "arcs": [
+    {"arc_name": "卷一 – ...", "chapter_start": 1, "chapter_end": 40, "premise": "one-sentence arc promise"}
+  ],
+  "planned_total_chapters": 120
+}
+
+## Critical Rules
+1. The arcs are CONSECUTIVE and their ranges sum to exactly the target chapter count.
+2. 3–8 arcs for a long novel; each arc 20–60 chapters.
+3. Each premise must escalate stakes beyond the previous arc.
+4. chapter_start/chapter_end are PLANNING references only — runtime numbering is recomputed.
+
+## Roster (authoritative character ids)
+{roster_block}
+
+## Output
+Return ONLY the JSON object."""
+
+ARC_PLANNER_USER = """\
+<concept>
+{concept_json}
+</concept>
+
+<world>
+{world_json}
+</world>
+
+<characters>
+{roster_block}
+</characters>
+
+<target_chapters>
+{target_chapters}
+</target_chapters>"""
+
+
+class ArcPlannerAgent(Agent[tuple[Concept, World, list[Character], int], ArcPlan]):
+    name = "arc_planner"   # message tag; model slot stays "outliner"
+    output_schema = ArcPlan
+
+    def build_messages(self, inputs: tuple[Concept, World, list[Character], int]) -> list[dict]:
+        concept, world, chars, target = inputs
+        roster_block = "\n".join(f"- {c.id} ({c.name}): {c.role}" for c in chars)
+        return [
+            {"role": "system", "agent": self.name,
+             "content": ARC_PLANNER_SYSTEM.replace("{roster_block}", roster_block)},
+            {"role": "user", "agent": self.name,
+             "content": ARC_PLANNER_USER.format(
+                 concept_json=concept.model_dump_json(),
+                 world_json=world.model_dump_json(),
+                 roster_block=roster_block,
+                 target_chapters=target)},
+        ]
+
+
+ARC_DETAILER_SYSTEM = """\
+You are a story architect detailing ONE volume (卷) of an existing long novel.
+
+## Task
+Given the volume skeleton, produce this volume's chapters and beats.
+
+## Output Schema (strict JSON)
+{
+  "arc_name": "…",
+  "chapters": [
+    {
+      "chapter_no": 41,
+      "chapter_title": "",
+      "beats": [
+        {"beat_id": "", "pov": "<character_id>", "setting": "<location>", "event": "1–2 sentences",
+         "emotional_turn": "X → Y", "characters": ["<character_id>"], "plants": [], "payoffs": []}
+      ]
+    }
+  ]
+}
+
+## Critical Rules
+1. **Numbering is HARD**: number chapters consecutively from {next_chapter_no}. Ignore the
+   skeleton's chapter_start/chapter_end as absolute positions; its length is a SOFT target
+   (you may deviate by a few chapters).
+2. **ID discipline**: pov and characters entries MUST be roster character ids.
+3. **Continuity**: honour the previous-arc summary and recent chapter summaries; pay off or
+   advance the open foreshadows when natural; never restate events already summarised.
+4. Each chapter has 1–4 beats; protagonist POV ≥ 60 % of beats.
+
+## Roster (authoritative character ids)
+{roster_block}
+
+## Output
+Return ONLY the JSON object."""
+
+ARC_DETAILER_USER = """\
+<volume_skeleton arc_name="{arc_name}" soft_chapters="{soft_n}">
+{premise}
+</volume_skeleton>
+
+<concept>
+{concept_json}
+</concept>
+
+<world>
+{world_json}
+</world>
+
+<characters>
+{roster_block}
+</characters>
+
+<previous_arc_summary>
+{prev_arc_block}
+</previous_arc_summary>
+
+<recent_chapter_summaries>
+{summaries_block}
+</recent_chapter_summaries>
+
+<open_foreshadows>
+{foreshadows_block}
+</open_foreshadows>
+
+<next_chapter_no>
+{next_chapter_no}
+</next_chapter_no>
+
+Detail this volume's chapters, numbered from {next_chapter_no}."""
+
+
+@dataclass
+class ArcDetailInput:
+    skeleton: ArcSkeleton
+    concept: Concept
+    world: World
+    characters: list[Character]
+    prev_arc: ArcSummary | None
+    open_foreshadows: list[Foreshadow]
+    recent_summaries: list[ChapterSummary]
+    next_chapter_no: int
+
+
+class ArcDetailerAgent(Agent[ArcDetailInput, Arc]):
+    name = "arc_detailer"   # message tag; model slot stays "outliner"
+    output_schema = Arc
+
+    def build_messages(self, inputs: ArcDetailInput) -> list[dict]:
+        s = inputs.skeleton
+        roster_block = "\n".join(f"- {c.id} ({c.name}): {c.role}" for c in inputs.characters)
+        prev_arc_block = inputs.prev_arc.summary if inputs.prev_arc else "(none — first volume)"
+        summaries_block = "\n".join(f"- ch{cs.chapter_no}: {cs.summary}"
+                                    for cs in inputs.recent_summaries) or "(none)"
+        foreshadows_block = "\n".join(f"- {f.id}: {f.description}"
+                                      for f in inputs.open_foreshadows) or "(none)"
+        soft_n = max(1, s.chapter_end - s.chapter_start + 1)
+        system = (ARC_DETAILER_SYSTEM
+                  .replace("{next_chapter_no}", str(inputs.next_chapter_no))
+                  .replace("{roster_block}", roster_block))
+        user = ARC_DETAILER_USER.format(
+            arc_name=s.arc_name, soft_n=soft_n, premise=s.premise or "(no premise)",
+            concept_json=inputs.concept.model_dump_json(),
+            world_json=inputs.world.model_dump_json(),
+            roster_block=roster_block,
+            prev_arc_block=prev_arc_block,
+            summaries_block=summaries_block,
+            foreshadows_block=foreshadows_block,
+            next_chapter_no=inputs.next_chapter_no)
         return [
             {"role": "system", "agent": self.name, "content": system},
             {"role": "user", "agent": self.name, "content": user},
