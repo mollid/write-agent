@@ -413,6 +413,31 @@ test("Generate: log lines render; job_end toasts and invalidates", async () => {
   expect(useEvents.getState().progress).toBeNull();
 });
 
+test("Generate: whole-book progress shown when plannedTotal is present", async () => {
+  stubFetchFor({ status: { has_outline: true, chapters: [1] }, outline: OUTLINE_RESP });
+  renderGenerate();
+
+  act(() => {
+    const st = useEvents.getState();
+    st.apply({ type: "stage", stage: "writer", chapter: 37, job_id: "j9" });
+    st.apply({ type: "chapter_start", chapter: 37, title: "T", planned_total: 240, job_id: "j9" });
+  });
+  expect(await screen.findByTestId("book-progress")).toHaveTextContent("第 37 / 共 240 章");
+});
+
+test("Generate: whole-book progress hidden when plannedTotal is absent", async () => {
+  stubFetchFor({ status: { has_outline: true, chapters: [1] }, outline: OUTLINE_RESP });
+  renderGenerate();
+
+  act(() => {
+    const st = useEvents.getState();
+    st.apply({ type: "stage", stage: "writer", chapter: 37, job_id: "j9" });
+    st.apply({ type: "chapter_start", chapter: 37, title: "T", job_id: "j9" });
+  });
+  expect(await screen.findByTestId("page-generate")).toBeInTheDocument();
+  expect(screen.queryByTestId("book-progress")).not.toBeInTheDocument();
+});
+
 test("Generate: a lastEnd from before the visit is not re-toasted; a new job_end still is", async () => {
   stubFetchFor({ status: { has_outline: true, chapters: [1] }, outline: OUTLINE_RESP });
   act(() => {

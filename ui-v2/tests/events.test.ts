@@ -151,6 +151,22 @@ describe("event store", () => {
     });
     expect(useEvents.getState().gate).toBeNull();
   });
+
+  test("tracks chapter_start with plannedTotal and clears on job_end", () => {
+    const s = useEvents.getState();
+    s.reset();
+    s.apply({ type: "chapter_start", chapter: 37, title: "T", planned_total: 240 });
+    expect(useEvents.getState().lastChapterStart).toEqual({ chapter: 37, plannedTotal: 240 });
+    s.apply({ type: "job_end", status: "done" });
+    expect(useEvents.getState().lastChapterStart).toBeNull();
+  });
+
+  test("chapter_start without planned_total records plannedTotal null", () => {
+    const s = useEvents.getState();
+    s.reset();
+    s.apply({ type: "chapter_start", chapter: 2, title: "T" });
+    expect(useEvents.getState().lastChapterStart).toEqual({ chapter: 2, plannedTotal: null });
+  });
 });
 
 describe("describe() log lines", () => {
@@ -216,6 +232,18 @@ describe("describe() log lines", () => {
     expect(describeEvent({ type: "job_end", status: "cancelled", job_id: "j" })).toBe("任务已取消");
     expect(describeEvent({ type: "job_end", status: "error", error: "boom", job_id: "j" })).toBe(
       "❌ 任务失败：boom",
+    );
+    expect(describeEvent({ type: "warning", warning: "chapter_edited", chapter: 7, job_id: "j" })).toMatch(
+      /^⚠ 第 7 章/,
+    );
+    expect(describeEvent({ type: "warning", warning: "chapter_edited", chapter: 7, job_id: "j" })).toContain(
+      "正文与摘要",
+    );
+    expect(describeEvent({ type: "arc_detailed", arc: "第一卷", chapters: 8, job_id: "j" })).toContain(
+      "卷「第一卷」明细已生成",
+    );
+    expect(describeEvent({ type: "arc_summary_done", arc: "第一卷", job_id: "j" })).toContain(
+      "卷「第一卷」摘要与全书梗概已更新",
     );
     expect(describeEvent({ type: "whatever", job_id: "j" })).toBeNull();
   });

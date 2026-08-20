@@ -10,6 +10,8 @@ export const STAGE_NAMES: Record<string, string> = {
   characters: "设计人物",
   outline: "编排大纲",
   resume: "从故事圣经恢复",
+  arc_detail: "生成下一卷明细",
+  summary_backfill: "补生成上一章摘要",
   writer: "正文写作中",
   writer_rewrite: "按评审意见重写中",
   scorer: "质量评分中",
@@ -24,6 +26,7 @@ export const GATE_LABELS: Record<string, string> = {
   outline: "大纲已生成，是否批准？",
   chapter: "本章已完成，是否继续？",
   chapter_review_failed: "本章多次重写后仍未达标，是否强行放行？",
+  arc_detail: "下一卷大纲明细已生成，是否批准？",
 };
 
 export const SETUP_STAGE_NAMES: Record<string, string> = {

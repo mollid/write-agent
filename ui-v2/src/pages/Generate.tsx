@@ -22,6 +22,7 @@ export default function Generate() {
   const lastStage = useEvents((s) => s.lastStage);
   const lines = useEvents((s) => s.lines);
   const lastEnd = useEvents((s) => s.lastEnd);
+  const lastStart = useEvents((s) => s.lastChapterStart);
   const write = useWriteChapters(name);
   const cancel = useCancelJob(name);
   const [n, setN] = useState(1);
@@ -108,7 +109,7 @@ export default function Generate() {
           已有 {existing} 章；本次将生成 {n} 章（含自动跳过的已完成章节）
         </Typography.Paragraph>
         <Space wrap>
-          <InputNumber min={1} max={50} value={n} onChange={(v) => setN(v ?? 1)} />
+          <InputNumber min={1} max={2000} value={n} onChange={(v) => setN(v ?? 1)} />
           <Button type="primary" data-testid="start-generate" loading={write.isPending} onClick={start}>
             开始生成
           </Button>
@@ -132,6 +133,11 @@ export default function Generate() {
           {lastStage ? (
             <Typography.Text type="secondary">
               当前阶段：{STAGE_NAMES[lastStage] ?? lastStage}
+            </Typography.Text>
+          ) : null}
+          {lastStart?.plannedTotal ? (
+            <Typography.Text data-testid="book-progress">
+              全书进度：第 {lastStart.chapter} / 共 {lastStart.plannedTotal} 章
             </Typography.Text>
           ) : null}
         </Card>

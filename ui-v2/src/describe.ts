@@ -60,6 +60,14 @@ export function describe(ev: SseEvent): string | null {
       return ev.applied ? "章节改写完成" : "章节改写未应用";
     case "tts_done":
       return `✔ 第 ${ev.chapter} 章语音已生成`;
+    case "warning":
+      return ev.warning === "chapter_edited"
+        ? `⚠ 第 ${ev.chapter} 章正文与摘要记录不一致（手动修改？）——状态未自动重算`
+        : `⚠ ${s("warning")}`;
+    case "arc_detailed":
+      return `📖 卷「${s("arc")}」明细已生成（${s("chapters")} 章）`;
+    case "arc_summary_done":
+      return `📘 卷「${s("arc")}」摘要与全书梗概已更新`;
     case "job_end":
       if (ev.status === "done") return "✅ 任务完成";
       if (ev.status === "cancelled") return "任务已取消";

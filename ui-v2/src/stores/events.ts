@@ -41,6 +41,9 @@ interface EventState {
   /** edge-tts: last tts_done (seq re-triggers repeated payloads); the Reader
    * TTS card watches it to clear its pending spinner for that chapter. */
   ttsDone: { chapter: number; seq: number } | null;
+  /** Last chapter_start: drives the Generate page's whole-book progress
+   * (第 x / 共 y 章); plannedTotal may be absent on the wire (older backend). */
+  lastChapterStart: { chapter: number; plannedTotal: number | null } | null;
   pushLine: (text: string) => void;
   setConnected: (v: boolean) => void;
   pushFeedback: (text: string) => void;
@@ -72,6 +75,7 @@ export const useEvents = create<EventState>((set) => ({
   chapterProposal: null,
   bibleChatDone: null,
   ttsDone: null,
+  lastChapterStart: null,
   pushLine: (text) =>
     set((s) => ({ lines: [...s.lines, { time: fmt(), text }].slice(-MAX_LINES) })),
   setConnected: (v) => set({ connected: v }),
@@ -90,6 +94,12 @@ export const useEvents = create<EventState>((set) => ({
       switch (ev.type) {
         case "stage":
           patch.lastStage = String(ev.stage);
+          break;
+        case "chapter_start":
+          patch.lastChapterStart = {
+            chapter: Number(ev.chapter ?? 0),
+            plannedTotal: typeof ev.planned_total === "number" ? ev.planned_total : null,
+          };
           break;
         case "gate":
           if (String(ev.label).startsWith("bible:")) {
@@ -136,6 +146,7 @@ export const useEvents = create<EventState>((set) => ({
           patch.job = null;
           patch.gate = null;
           patch.progress = null;
+          patch.lastChapterStart = null;
           patch.bibleProposal = null;
           patch.outlineProposal = null;
           patch.chapterProposal = null;
@@ -199,7 +210,7 @@ export const useEvents = create<EventState>((set) => ({
     set({
       gate: null, job: null, progress: null, setupArtifact: null, gateDismissed: false,
       bibleProposal: null, outlineProposal: null, chapterProposal: null, bibleChatDone: null,
-      ttsDone: null,
+      ttsDone: null, lastChapterStart: null,
     }),
   reset: () =>
     set({
@@ -219,5 +230,6 @@ export const useEvents = create<EventState>((set) => ({
       chapterProposal: null,
       bibleChatDone: null,
       ttsDone: null,
+      lastChapterStart: null,
     }),
 }));
