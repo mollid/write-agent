@@ -437,3 +437,42 @@ def test_continuity_receives_compact_view_not_canonical(tmp_path):
     user = str(captured[0]["content"])
     assert "[Character" in user        # compact view carries the character card
     assert "_canonical" not in user and '"logline"' not in user   # NOT the raw canonical JSON
+
+
+def test_gate_every_n_skips_intermediate_chapters(tmp_path):
+    proj, bible, vector, provider = _two_chapter_arc_setup(tmp_path)
+    gates: list[tuple[str, object]] = []
+    state = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                              proj=proj, premise="a thief", target_chapters=2,
+                              gate_every_n=2, on_gate=lambda label, art: gates.append((label, art)) or True)
+    assert state.error is None and state.written == [1, 2]
+    # only ch2 (2 % 2 == 0); default N=1 fires every chapter. (The one-shot SETUP
+    # branch also fires an "outline" gate on a fresh project — not part of the
+    # chapter cadence under test, so filter to chapter gates.)
+    assert [g[0] for g in gates if g[0] == "chapter"] == ["chapter"]
+
+
+def test_chapter_events_carry_planned_total(tmp_path):
+    proj, bible, vector, provider = _two_chapter_arc_setup(tmp_path)
+    events: list[dict[str, object]] = []
+    run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                      proj=proj, premise="a thief", target_chapters=1, planned_total=240,
+                      on_event=events.append)
+    start = next(e for e in events if e["type"] == "chapter_start")
+    done = next(e for e in events if e["type"] == "chapter_done")
+    assert start["planned_total"] == 240 and done["planned_total"] == 240
+
+
+def test_edited_chapter_hash_warning(tmp_path):
+    proj, bible, vector, provider = _two_chapter_arc_setup(tmp_path)
+    state1 = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                               proj=proj, premise="a thief", target_chapters=1)
+    assert state1.error is None
+    (proj.root / "chapters" / "001.md").write_text("手改后的正文。", encoding="utf-8")
+    events: list[dict[str, object]] = []
+    state2 = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                               proj=proj, premise="", target_chapters=2, start_chapter=2,
+                               on_event=events.append)
+    assert state2.error is None
+    warn = [e for e in events if e["type"] == "warning" and e["warning"] == "chapter_edited"]
+    assert warn and warn[0]["chapter"] == 1

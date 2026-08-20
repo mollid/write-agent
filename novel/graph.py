@@ -22,7 +22,7 @@ from novel.setup_flow import approve_stage, generate_stage, stage_done
 from novel.store.bible import StoryBible
 from novel.store.notes import WritingNotes
 from novel.store.reviews import ReviewStore
-from novel.store.summaries import SummaryStore, sha256_text
+from novel.store.summaries import SummaryStore, detect_edited_chapters, sha256_text
 from novel.store.vector import VectorMemory
 
 
@@ -102,6 +102,11 @@ def run_full_pipeline(
     # skip positions < start_chapter instead of restarting the outline from the top.
     summaries = SummaryStore(proj)
 
+    # user contract (spec §5): manual prose edits that bypassed the pipeline are
+    # detected (hash mismatch) and reported — state is NOT auto-rebuilt
+    for n in detect_edited_chapters(proj, summaries):
+        emit({"type": "warning", "warning": "chapter_edited", "chapter": n})
+
     def flat_chapters() -> list[tuple[str, ChapterOutline]]:
         return [(a.arc_name, c) for a in outline.arcs for c in a.chapters]
 
@@ -146,7 +151,8 @@ def run_full_pipeline(
             continue
         beats = ch_out.beats
         assert beats, f"chapter {chapter_no} has no beat"
-        emit({"type": "chapter_start", "chapter": chapter_no, "title": ch_out.chapter_title})
+        emit({"type": "chapter_start", "chapter": chapter_no, "title": ch_out.chapter_title,
+              "planned_total": planned_total})
         arc_sum = summaries.get_arc_summary(arc_name)
         recent = summaries.recent_chapter_summaries(upto=chapter_no - 1, k=RECENT_SUMMARY_K)
         digest = summaries.get_book_digest()
@@ -245,9 +251,9 @@ def run_full_pipeline(
         tmp = chapters_dir / f".{chapter_no:03d}.md.tmp"
         tmp.write_text(prose, encoding="utf-8")
         tmp.replace(chapters_dir / f"{chapter_no:03d}.md")
-        emit({"type": "chapter_done", "chapter": chapter_no})
+        emit({"type": "chapter_done", "chapter": chapter_no, "planned_total": planned_total})
         state.written.append(chapter_no)
-        if on_gate:
+        if on_gate and gate_every_n > 0 and chapter_no % gate_every_n == 0:
             on_gate("chapter", chapter_no)
         idx += 1
     total_outline = len(flat_chapters())
