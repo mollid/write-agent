@@ -28,7 +28,7 @@ class PremiseReq(BaseModel):
 
 
 class WriteReq(BaseModel):
-    n: int = Field(default=1, ge=1, le=50)
+    n: int = Field(default=1, ge=1, le=2000)
 
 
 class GateReq(BaseModel):

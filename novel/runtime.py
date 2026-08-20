@@ -26,8 +26,13 @@ def make_provider(cfg: ProjectConfig) -> ModelProvider:
 def demo_provider() -> ModelProvider:
     from novel.models import (
         Arc,
+        ArcPlan,
+        ArcSkeleton,
+        ArcSummary,  # noqa: F401 - summarizer canned doubles for chapter/arc (schema-validated)
+        BookDigest,
         ChapterBeat,
         ChapterOutline,
+        ChapterSummary,
         Character,
         Concept,
         DimensionScore,
@@ -50,6 +55,17 @@ def demo_provider() -> ModelProvider:
     return FakeProvider(responses={
         "strategist": concept, "worldbuilder": World(setting="city of bells"),
         "character": chars, "outliner": outline,
+        "arc_planner": ArcPlan(arcs=[ArcSkeleton(arc_name="第一卷", chapter_start=1,
+                                                  chapter_end=6, premise="demo"),
+                                     ArcSkeleton(arc_name="第二卷", chapter_start=7,
+                                                 chapter_end=12, premise="demo2")],
+                               planned_total_chapters=12),
+        "arc_detailer": Arc(arc_name="第一卷", chapters=[
+            ChapterOutline(chapter_no=99, chapter_title="D1",
+                           beats=[ChapterBeat(pov="Ara", setting="tavern", event="demo arc detail",
+                                              emotional_turn="doubt", characters=["c1"])])]),
+        "summarizer": ChapterSummary(chapter_no=1, summary="演示摘要。"),
+        "digestor": BookDigest(chapter_count=6, current_arc="第一卷", summary="演示梗概。"),
         "writer": "Ara stepped into the tavern. The thief's work was about to begin.",
         "continuity": "[]", "editor": "Ara stepped into the tavern.",
         "scorer": passing,

@@ -264,6 +264,11 @@ def run_chapters_job(proj_root: Path, n: int) -> Callable[[Job], object]:
             score_min=cfg.thresholds.score_min, max_retries=cfg.thresholds.max_retries,
             token_budget=cfg.generation.context_token_budget,
             min_chapter_chars=min_chars,
+            planned_total=cfg.generation.target_chapters,
+            gate_every_n=cfg.generation.human_gate_every_n_chapters,
+            language=cfg.language,
+            chapter_target_length=cfg.generation.chapter_target_length,
+            arc_lookahead=cfg.generation.arc_detail_lookahead,
             on_gate=job.gate if is_live_mode() else None,
             on_event=job.emit,
         )

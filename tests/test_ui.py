@@ -28,6 +28,16 @@ def _wait_job(client: TestClient, job_id: str, timeout: float = 30.0) -> dict[st
     raise AssertionError("job did not finish in time")
 
 
+def test_write_req_cap_raised() -> None:
+    """WriteReq.n accepts up to 2000; values above the cap are rejected."""
+    from novel.ui.app import WriteReq
+
+    req = WriteReq(n=2000)
+    assert req.n == 2000
+    with pytest.raises(ValueError):
+        WriteReq(n=2001)
+
+
 def test_create_and_list_projects(client: TestClient, tmp_path: Path) -> None:
     r = client.get("/api/projects")
     assert r.status_code == 200 and r.json() == []

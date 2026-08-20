@@ -106,3 +106,25 @@ def test_write_chapter_rewrites_empty_chapter(tmp_path):
     assert len((proj / "chapters" / "001.md").read_text()) > 50  # rewritten
     assert ch2.read_text() == good  # complete chapter untouched
     assert len(sorted((proj / "chapters").glob("[0-9][0-9][0-9].md"))) == 2
+
+
+_FakeState = type("S", (), {"error": None, "written": []})()
+
+
+def test_write_chapter_passes_longform_params(tmp_path, monkeypatch):
+    """write-chapter wires cfg.generation longform fields into run_full_pipeline."""
+    from novel import cli, graph
+    from novel.project import NovelProject
+
+    proj = NovelProject.scaffold("n", "fantasy", root=tmp_path)
+    cfg_path = proj.config_path
+    raw = cfg_path.read_text(encoding="utf-8")
+    cfg_path.write_text(raw + "generation:\n  target_chapters: 240\n  arc_detail_lookahead: 8\n",
+                        encoding="utf-8")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(graph, "run_full_pipeline",
+                        lambda **kw: captured.update(kw) or _FakeState)
+    cli.write_chapter(1, proj.root)  # typer function called directly
+    assert captured["planned_total"] == 240
+    assert captured["arc_lookahead"] == 8
+    assert captured["gate_every_n"] == 1
