@@ -154,3 +154,33 @@ def test_extractor_prompts_match_spec_shape():
     assert EXTRACTOR_USER.startswith("<chapter_number>{chapter_no}</chapter_number>")
     assert "{roster_block}" in EXTRACTOR_USER
     assert "{prose}" in EXTRACTOR_USER
+
+
+def test_extraction_carries_chapter_summary_and_previous_state():
+    from novel.memory.extractor import extract_updates
+    from novel.models import Character, CharacterState
+
+    captured: list[list[dict[str, object]]] = []
+
+    class _Recording(FakeProvider):
+        def complete_structured(self, messages, schema, cfg, *, seed=None):
+            captured.append(messages)
+            return super().complete_structured(messages, schema, cfg, seed=seed)
+
+    chars = [Character(id="c1", slug="ara", name="Ara", role="protagonist", backstory="b",
+                       motivation="m", arc="a",
+                       state=CharacterState(emotional_state="doubt", location_end="tavern"))]
+    provider = _Recording({
+        "extractor": {
+            "character_states": {"c1": {"emotional_state": "resolve", "physical_state": "",
+                                         "knowledge_gained": [], "relationships_shifted": {},
+                                         "location_end": "tower"}},
+            "voice_samples": {}, "mannerisms_used": {}, "key_events": [],
+            "threads_advanced": [], "new_information_revealed": [],
+            "chapter_summary": "阿娜离开酒馆潜入钟塔。",
+        }})
+    upd = extract_updates(1, "正文。", chars, provider, ModelConfig("zhipu", "x"))
+    assert upd.chapter_summary == "阿娜离开酒馆潜入钟塔。"
+    # roster block carries the character's previous state for complete-state output
+    system = str(captured[0][0]["content"])
+    assert "previous_state" in system and '"emotional_state":"doubt"' in system.replace(" ", "")

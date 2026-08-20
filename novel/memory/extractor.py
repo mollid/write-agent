@@ -31,6 +31,7 @@ Extract structured updates from the chapter below to update the persistent story
   "mannerisms_used": {
     "<character_id>": ["verbal tic or physical habit observed in this chapter"]
   },
+  "chapter_summary": "150–250 unit plot summary of THIS chapter: what happened, who was involved, what changed",
   "key_events": [
     {"event": "...", "significance": "...", "affected_characters": ["<id>"]}
   ],
@@ -43,6 +44,10 @@ Extract structured updates from the chapter below to update the persistent story
 2. **Evidence-based**: Every extracted fact must be directly supported by the text. Do not speculate.
 3. **Completeness**: Include every roster character who appears, speaks, or is directly referenced with new information.
 4. **Brevity**: Each field value should be concise (1–2 sentences max).
+5. **Complete states, not deltas**: each `character_states` value must be the character's
+   FULL state at the chapter's end — carry forward any `previous_state` fields still true.
+6. **Summary discipline**: `chapter_summary` covers plot progression, involved characters
+   and state changes; never a teaser or a list of foreshadows.
 
 ## Roster (authoritative character ids)
 {roster_block}
@@ -71,6 +76,7 @@ class _UpdatePayload(BaseModel):
     key_events: list[KeyEvent] = Field(default_factory=list)
     threads_advanced: list[str] = Field(default_factory=list)
     new_information_revealed: list[str] = Field(default_factory=list)
+    chapter_summary: str = ""
 
 
 @dataclass
@@ -81,6 +87,7 @@ class ChapterUpdates:
     key_events: list[KeyEvent] = field(default_factory=list)
     threads_advanced: list[str] = field(default_factory=list)
     new_information_revealed: list[str] = field(default_factory=list)
+    chapter_summary: str = ""
 
 
 MAX_RETRIES = 2
@@ -93,7 +100,8 @@ def extract_updates(
     provider: ModelProvider,
     cfg: ModelConfig,
 ) -> ChapterUpdates:
-    roster_block = "\n".join(f"- {c.id} ({c.name})" for c in characters)
+    roster_block = "\n".join(
+        f"- {c.id} ({c.name})\n  previous_state: {c.state.model_dump_json()}" for c in characters)
     # EXTRACTOR_SYSTEM carries a literal JSON-schema block plus {roster_block} → str.replace
     # (not .format) to avoid escaping every literal brace.
     system = EXTRACTOR_SYSTEM.replace("{roster_block}", roster_block)
@@ -122,6 +130,7 @@ def extract_updates(
                 key_events=payload.key_events,
                 threads_advanced=payload.threads_advanced,
                 new_information_revealed=payload.new_information_revealed,
+                chapter_summary=payload.chapter_summary,
             )
         except ValidationError as e:
             last_err = e
