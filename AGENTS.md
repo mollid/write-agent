@@ -27,7 +27,7 @@ Run a single test file: `uv run pytest tests/test_graph.py -q`. Python commands 
 - `novel/agents/` — one file per role. All inherit `Agent[I, O]` in `base.py`: implement `build_messages()` and set `output_schema` (a pydantic model); `run()` handles validation-error retries.
 - `novel/graph.py` — pipeline orchestration (`PipelineState`, chapter loop, scoring gates). `novel/scorer_rubrics.py` — score thresholds and rewrite/escalation decisions. `run_full_pipeline` emits progress events via optional `on_event` callback (event dicts with `type` in `stage`/`chapter_start`/`review`/`chapter_done`/`chapter_skipped`/`done`; the GUI's `Job.emit` reuses these as the SSE wire format) — keep CLI behavior unchanged by leaving it `None` there.
 - `novel/memory/` — `assembler.py` (context assembly within token budget), `extractor.py` (post-chapter state extraction back into bible/memory).
-- `novel/store/` — `bible.py` (story bible: `_canonical.json`, foreshadowing, events), `vector.py` (chromadb vector memory), `reviews.py` (append-only scoring history at `.meta/reviews/reviews.jsonl`; every scorer attempt on a chapter is persisted by `run_full_pipeline`).
+- `novel/store/` — `bible.py` (story bible: `_canonical.json`, foreshadowing, events), `vector.py` (chromadb vector memory), `reviews.py` (append-only scoring history at `.meta/reviews/reviews.jsonl`; every scorer attempt on a chapter is persisted by `run_full_pipeline`), `summaries.py` (章/卷/全书三级摘要 + 手改哈希检测：`chapters/_summaries/`、`.meta/summaries.json`、`.meta/threads_resolved.jsonl`).
 - `novel/models.py` — shared pydantic schemas. `novel/config.py` — `ProjectConfig` / `ModelConfig` (per-agent provider, model, `api_base`, `api_key`, `timeout`; falls back to `default`, then first model).
 
 New model outputs must be pydantic schemas; agents are typed generic `Agent[I, O]` and mypy strict must stay clean.
@@ -38,6 +38,7 @@ New model outputs must be pydantic schemas; agents are typed generic `Agent[I, O
 - **`novel-ui` gates only fire in live mode** (same as CLI); demo-mode GUI runs have no approval prompts. Cancellation takes effect at the next `on_event` emit (chapter/stage boundary).
 - **`project.config.yaml` is gitignored and contains plaintext API keys** — never commit, copy, or paste it anywhere. `demo-novel/`, `*-novel/`, and `docs/superpowers/specs/` are also gitignored by design, as are `ui-v2/node_modules/` and `ui-v2/dist/` — `tests/test_ui.py::test_ui_v2_dist_served` is `skipif`-guarded on dist existing, so CI without Node stays green.
 - Chapters are `chapters/001.md`-style three-digit files; continuation logic only recognizes that format — don't rename. `runs/` is scaffolded but still unused; review history lives in `.meta/reviews/reviews.jsonl` (not `runs/`).
+- `chapters/_summaries/NNN.json` 与 `.meta/` 下的摘要/伏笔归档文件存在即用、缺失即降级，不影响 resume 判定.
 - `language: zh|en` in project config controls output language of all agents in live mode; prompts and code identifiers are otherwise English.
 - OpenAI-compatible endpoints (ollama, vLLM, etc.) always use `provider: openai` + `api_base`; local models need a non-empty placeholder `api_key` and often a larger `timeout`.
 - Human gates in live mode only accept `a`/Enter; anything else aborts that stage.

@@ -131,7 +131,7 @@ cd ui-v2 && npm install && npm run build
 
 #### 大纲追章
 
-大纲章节不够写时（`write-chapter` 会警告 `outline exhausted`），在设定库「大纲」段使用「大纲追章」：输入要追加的章节数（1–50），系统生成追章建议并以 diff 展示，批准后并入大纲；之后再次运行 `write-chapter`（或界面「生成章节」）即可继续写新追加的章节，`outline exhausted` 警告随之消除。演示模式下会确定性地追加占位章节，流程同样可以走通。
+大纲章节不够写时（`write-chapter` 会警告 `outline exhausted`），在设定库「大纲」段使用「大纲追章」：输入要追加的章节数（1–50），系统生成追章建议并以 diff 展示，批准后并入大纲；之后再次运行 `write-chapter`（或界面「生成章节」）即可继续写新追加的章节，`outline exhausted` 警告随之消除。演示模式下会确定性地追加占位章节，流程同样可以走通。设置了 `target_chapters` 时，写作循环会在已明细章节不足时**自动**生成下一卷明细（live 模式会经过 `arc_detail` 人工门），UI 手动追章仍可用，两种方式共存。
 
 ## 快速开始：演示模式
 
@@ -248,6 +248,13 @@ uv run novel write-chapter 2
 
 章节采用原子写入（先写 `chapters/.NNN.md.tmp` 临时文件再改名），中断不会留下半截的 `001.md`；极少数情况下磁盘上可能残留 `.001.md.tmp` 之类的临时文件，下次运行时会自动清理，不影响章节识别与导出。
 
+### 用户契约：手动修改已完成章节
+
+直接编辑 `chapters/NNN.md` **不会**自动同步角色状态、事件与伏笔（extractor 只在管线写作时运行）。
+系统在每次写作任务启动时会校验章节文件哈希（记录于 `chapters/_summaries/NNN.json` 的
+`prose_sha256`），不一致时在 UI 发出警告，但**不会自动重算状态**。需要状态重建时，
+请重写该章（Reader 页改写功能会走完整回写），或等待后续的 backfill 工具。
+
 ### 4. 查看故事线索
 
 使用 `threads` 查看尚未收束的伏笔和线索：
@@ -345,6 +352,9 @@ generation:
 | `generation.context_token_budget` | 每章工作记忆的上下文 Token 预算，默认 `24000`。 |
 | `generation.min_chapter_chars` | 断点续跑时判定章节「已完成」的最小字符数，默认 `50`（必须低于演示模式章节长度 62）。真实模型项目建议设为实际章节长度的下限（如 `2000`）；设得过大会导致同一章每次续跑都被重写。 |
 | `generation.human_gate_every_n_chapters` | 人工审核频率配置；当前实现会在真实模式的大纲与每章阶段请求批准。 |
+| `generation.target_chapters` | 计划全书总章数；设置后 setup 走两段式大纲（卷骨架 + 按卷明细），留空保持单次全量出纲 | `None`（留空） |
+| `generation.chapter_target_length` | 每章目标长度（zh=字 / en=词），注入写手提示词 | `2500` |
+| `generation.arc_detail_lookahead` | 自动续纲提前量：已明细章节不足该值时自动生成下一卷明细（强剧情可调大） | `5` |
 | `language` | 输出语言开关，`en`（默认）或 `zh`。真实模式下所有智能体按此语言生成自然语言文本。 |
 
 #### 混用多家 OpenAI 兼容模型
@@ -518,4 +528,4 @@ uv run novel write-chapter 1 --project ./my-novel
 
 另外，续写仅识别 `chapters/` 下命名为 `001.md`、`002.md` 这类三位数字的章节文件。不要手动修改章节编号格式；需要重新开始时，请创建新项目目录。
 
-续写会严格按大纲章节顺序对位：第 N 个章节文件由大纲第 N 章的节拍生成。若请求的章节数超过大纲已有的章节数，命令会给出 `outline exhausted` 警告并只写出实际可写的章节。
+续写会严格按大纲章节顺序对位：第 N 个章节文件由大纲第 N 章的节拍生成。若请求的章节数超过大纲已有的章节数，命令会给出 `outline exhausted` 警告并只写出实际可写的章节。设置了 `target_chapters` 时，写作循环会在已明细章节不足时**自动**生成下一卷明细（live 模式经过 `arc_detail` 人工门），`outline exhausted` 通常不会出现；手动追章仍可用，二者共存。
