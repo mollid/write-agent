@@ -79,3 +79,26 @@ def test_min_chapter_chars_default_and_override(tmp_path):
     )
     cfg2 = load_config(proj.config_path)
     assert cfg2.generation.min_chapter_chars == 2000
+
+
+def test_generation_longform_fields_parse(tmp_path):
+    from novel.config import load_config
+    cfg_file = tmp_path / "project.config.yaml"
+    cfg_file.write_text(
+        "models: { default: { provider: zhipu, model: glm-4-plus } }\n"
+        "generation:\n"
+        "  target_chapters: 240\n"
+        "  chapter_target_length: 3000\n"
+        "  arc_detail_lookahead: 10\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(cfg_file)
+    assert cfg.generation.target_chapters == 240
+    assert cfg.generation.chapter_target_length == 3000
+    assert cfg.generation.arc_detail_lookahead == 10
+
+
+def test_generation_longform_fields_default_off():
+    from novel.config import Generation
+    g = Generation()
+    assert g.target_chapters is None and g.chapter_target_length == 2500 and g.arc_detail_lookahead == 5

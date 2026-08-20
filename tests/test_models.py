@@ -134,3 +134,24 @@ def test_world_defaults_keep_empty_object_lists():
     assert w.factions == []
     assert w.locations == []
     assert all(isinstance(f, Faction) for f in w.factions)
+
+
+def test_longform_models_defaults_and_outline_arc_plan():
+    from novel.models import ArcPlan, ArcSkeleton, ArcSummary, BookDigest, ChapterSummary, Outline
+    cs = ChapterSummary(chapter_no=3, summary="主角抵达钟城")
+    assert cs.arc_name == "" and cs.prose_sha256 == ""
+    o = Outline()
+    assert o.arc_plan == []          # 旧 bible JSON 缺该字段也能加载
+    plan = ArcPlan(arcs=[ArcSkeleton(arc_name="卷一", chapter_start=1, chapter_end=30,
+                                     premise="偷取时间")], planned_total_chapters=120)
+    assert plan.arcs[0].premise == "偷取时间"
+    d = BookDigest(chapter_count=30, summary="第一卷完结")
+    assert d.current_arc == ""
+    a = ArcSummary(arc_name="卷一", chapter_start=1, chapter_end=30, summary="…")
+    assert a.major_developments == []
+
+
+def test_character_last_updated_chapter_default():
+    from novel.models import Character
+    c = Character(id="c1", slug="a", name="A", role="p", backstory="b", motivation="m", arc="a")
+    assert c.last_updated_chapter == 0

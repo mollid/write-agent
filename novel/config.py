@@ -26,6 +26,9 @@ class Generation:
     human_gate_every_n_chapters: int = 1
     context_token_budget: int = 24000
     min_chapter_chars: int = 50    # resume check: shorter chapter files count as incomplete
+    target_chapters: int | None = None    # planned whole-book total; None = legacy one-shot outline
+    chapter_target_length: int = 2500     # per-chapter target: zh=字, en=words
+    arc_detail_lookahead: int = 5         # auto arc-detail trigger runway (chapters)
 
 
 @dataclass
@@ -65,6 +68,9 @@ def load_config(path: Path) -> ProjectConfig:
             human_gate_every_n_chapters=gen.get("human_gate_every_n_chapters", 1),
             context_token_budget=gen.get("context_token_budget", 24000),
             min_chapter_chars=gen.get("min_chapter_chars", 50),
+            target_chapters=gen.get("target_chapters"),
+            chapter_target_length=gen.get("chapter_target_length", 2500),
+            arc_detail_lookahead=gen.get("arc_detail_lookahead", 5),
         ),
         language=str(raw.get("language", "en")).strip().lower() or "en",
     )

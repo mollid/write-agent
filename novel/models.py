@@ -86,6 +86,7 @@ class Character(BaseModel):
     description_history: list[str] = Field(default_factory=list)
     relationships: dict[str, str] = Field(default_factory=dict)
     state: CharacterState = Field(default_factory=CharacterState)
+    last_updated_chapter: int = 0
 
 
 class ChapterBeat(BaseModel):
@@ -117,9 +118,46 @@ class ForeshadowLedgerEntry(BaseModel):
     description: str = ""
 
 
+class ChapterSummary(BaseModel):
+    chapter_no: int
+    arc_name: str = ""
+    summary: str
+    characters_involved: list[str] = Field(default_factory=list)
+    threads_advanced: list[str] = Field(default_factory=list)
+    prose_sha256: str = ""    # set by the pipeline at write time (manual-edit detection)
+
+
+class ArcSummary(BaseModel):
+    arc_name: str
+    chapter_start: int
+    chapter_end: int
+    summary: str
+    major_developments: list[str] = Field(default_factory=list)
+
+
+class BookDigest(BaseModel):
+    chapter_count: int
+    current_arc: str = ""
+    summary: str = ""
+
+
+class ArcSkeleton(BaseModel):
+    """卷骨架：章数为软目标，编号以运行时 next_chapter_no 为准（spec §4.3）。"""
+    arc_name: str
+    chapter_start: int
+    chapter_end: int
+    premise: str = ""
+
+
+class ArcPlan(BaseModel):
+    arcs: list[ArcSkeleton] = Field(default_factory=list)
+    planned_total_chapters: int = 0
+
+
 class Outline(BaseModel):
     arcs: list[Arc] = Field(default_factory=list)
     foreshadow_ledger: list[ForeshadowLedgerEntry] = Field(default_factory=list)
+    arc_plan: list[ArcSkeleton] = Field(default_factory=list)
 
 
 class Foreshadow(BaseModel):
