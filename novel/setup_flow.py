@@ -17,6 +17,7 @@ from novel.models import (
     Arc,
     ArcSkeleton,
     ArcSummary,
+    ChapterSummary,
     Character,
     Concept,
     Foreshadow,
@@ -91,7 +92,7 @@ def generate_two_phase_outline(*, provider: ModelProvider, cfg_map: dict[str, Mo
     assert plan.arcs, "arc planner returned no volumes"
     existing_max = 0
     arc = _detail_arc(provider, cfg_map, bible, plan.arcs[0], prev_arc=None,
-                      next_chapter_no=existing_max + 1)
+                      next_chapter_no=existing_max + 1, recent_summaries=[])
     outline = Outline(arcs=[arc], arc_plan=plan.arcs[1:])
     merge_foreshadow_ledger(outline, bible)
     return outline
@@ -99,7 +100,7 @@ def generate_two_phase_outline(*, provider: ModelProvider, cfg_map: dict[str, Mo
 
 def _detail_arc(provider: ModelProvider, cfg_map: dict[str, ModelConfig],
                 bible: StoryBible, skeleton: ArcSkeleton, prev_arc: ArcSummary | None,
-                next_chapter_no: int) -> Arc:
+                next_chapter_no: int, recent_summaries: list[ChapterSummary]) -> Arc:
     concept = bible.get_concept()
     world = bible.get_world()
     assert concept is not None and world is not None, "concept+world required"
@@ -108,7 +109,7 @@ def _detail_arc(provider: ModelProvider, cfg_map: dict[str, ModelConfig],
         characters=list(bible.all_characters()), prev_arc=prev_arc,
         open_foreshadows=[f for f in bible.list_foreshadow()
                           if f.status == ForeshadowStatus.OPEN],
-        recent_summaries=[], next_chapter_no=next_chapter_no))
+        recent_summaries=recent_summaries, next_chapter_no=next_chapter_no))
     # defensive renumbering: model output numbers are advisory only (spec §4.3)
     for i, ch in enumerate(arc.chapters):
         ch.chapter_no = next_chapter_no + i

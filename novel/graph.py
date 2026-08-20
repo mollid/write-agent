@@ -115,8 +115,9 @@ def run_full_pipeline(
         prev_name = outline.arcs[-1].arc_name if outline.arcs else ""
         prev_arc = summaries.get_arc_summary(prev_name) if prev_name else None
         existing_max = max((c.chapter_no for a in outline.arcs for c in a.chapters), default=0)
+        recent = summaries.recent_chapter_summaries(upto=existing_max, k=RECENT_SUMMARY_K)
         from novel.setup_flow import _detail_arc
-        arc = _detail_arc(provider, cfg_map, bible, skeleton, prev_arc, existing_max + 1)
+        arc = _detail_arc(provider, cfg_map, bible, skeleton, prev_arc, existing_max + 1, recent)
         outline.arcs.append(arc)
         bible.set_outline(outline)
         emit({"type": "arc_detailed", "arc": skeleton.arc_name,

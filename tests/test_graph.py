@@ -494,10 +494,12 @@ class _ArcSequenceProvider(_RecordingWriterProvider):
     def __init__(self, responses, arcs):
         super().__init__(responses)
         self._arcs = list(arcs)
+        self.arc_detailer_users: list[str] = []
 
     def _lookup(self, messages):
         from novel.providers import _agent_tag
         if _agent_tag(messages, self.tag_key) == "arc_detailer":
+            self.arc_detailer_users.append(str(messages[-1]["content"]))
             return self._arcs.pop(0)
         return super()._lookup(messages)
 
@@ -538,3 +540,41 @@ def test_auto_extend_details_next_arc_and_arc_summary(tmp_path):
     store = SummaryStore(proj)
     assert store.get_arc_summary("卷一").summary == "卷一摘要。"
     assert store.get_book_digest().summary == "全书梗概。"
+
+
+def test_arc_detailer_receives_recent_chapter_summaries(tmp_path):
+    """§4.3: the next volume's detailer must see 近 K 章 chapter summaries
+    (its only continuity memory — prev_arc is still None at auto-extend time)."""
+    proj, bible, vector, concept, _beat, _o, chars = _one_chapter_setup(tmp_path)
+    beat = ChapterBeat(pov="Ara", setting="t", event="e", emotional_turn="d", characters=["c1"])
+    # 3-chapter first volume so a lookahead of 2 fires the auto-extend mid-volume,
+    # after chapter 1 has been written and summarised
+    skeleton_outline = Outline(
+        arcs=[Arc(arc_name="卷一", chapters=[
+            ChapterOutline(chapter_no=i, chapter_title=f"T{i}", beats=[beat])
+            for i in (1, 2, 3)])],
+        arc_plan=[ArcSkeleton(arc_name="卷二", chapter_start=4, chapter_end=5, premise="p2")])
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
+    arc2 = Arc(arc_name="卷二", chapters=[
+        ChapterOutline(chapter_no=99, chapter_title="T4", beats=[beat]),
+        ChapterOutline(chapter_no=100, chapter_title="T5", beats=[beat])])
+    provider = _ArcSequenceProvider({
+        "strategist": concept, "worldbuilder": World(setting="city"), "character": chars,
+        "outliner": skeleton_outline, "writer": "Chapter prose text.", "continuity": "[]",
+        "editor": "x", "scorer": passing,
+        "extractor": {"character_states": {}, "voice_samples": {}, "mannerisms_used": {},
+                      "key_events": [], "threads_advanced": [], "new_information_revealed": [],
+                      "chapter_summary": "摘要。"},
+        "summarizer": {"arc_name": "卷一", "chapter_start": 1, "chapter_end": 3,
+                       "summary": "卷一摘要。", "major_developments": []},
+        "digestor": {"chapter_count": 3, "current_arc": "卷一", "summary": "全书梗概。"},
+    }, arcs=[arc2])
+    state = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                              proj=proj, premise="a thief", target_chapters=5, arc_lookahead=2)
+    assert state.error is None and state.written == [1, 2, 3, 4, 5]
+    assert provider.arc_detailer_users, "arc_detailer was never called"
+    user = provider.arc_detailer_users[0]
+    block = user.split("<recent_chapter_summaries>")[1].split("</recent_chapter_summaries>")[0]
+    assert "- ch1: 摘要。" in block          # recent chapter summary reached the detailer
+    assert "(none)" not in block
