@@ -341,3 +341,99 @@ def test_resume_beyond_outline_reports_exhaustion(tmp_path):
     assert state2.error is not None and "exhausted" in state2.error
     assert state2.written == []
     assert not (proj.root / "chapters" / "004.md").exists()
+
+
+def _two_chapter_arc_setup(tmp_path):
+    proj, bible, vector, concept, _beat, _outline, chars = _one_chapter_setup(tmp_path)
+    outline = Outline(arcs=[Arc(arc_name="卷一", chapters=[
+        ChapterOutline(chapter_no=i, chapter_title=f"T{i}", beats=[ChapterBeat(
+            pov="Ara", setting="t", event=f"event-{i}", emotional_turn="d",
+            characters=["c1"])]) for i in (1, 2)])])
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
+    provider = _RecordingWriterProvider(responses={
+        "strategist": concept, "worldbuilder": World(setting="city"), "character": chars,
+        "outliner": outline, "writer": "Chapter prose text.", "continuity": "[]",
+        "editor": "Chapter prose text.", "scorer": passing,
+        "extractor": {"character_states": {}, "voice_samples": {}, "mannerisms_used": {},
+                      "key_events": [], "threads_advanced": [], "new_information_revealed": [],
+                      "chapter_summary": "第二章摘要。"}})
+    return proj, bible, vector, provider
+
+
+def test_chapter_summaries_written_with_sha(tmp_path):
+    from novel.store.summaries import SummaryStore
+    proj, bible, vector, provider = _two_chapter_arc_setup(tmp_path)
+    state = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                              proj=proj, premise="a thief", target_chapters=2)
+    assert state.error is None
+    store = SummaryStore(proj)
+    cs2 = store.get_chapter_summary(2)
+    assert cs2.summary == "第二章摘要。" and cs2.arc_name == "卷一"
+    assert cs2.prose_sha256 == __import__("hashlib").sha256(
+        b"Chapter prose text.").hexdigest()
+
+
+def test_writer_receives_all_beats_and_target_note(tmp_path):
+    proj, bible, vector, provider = _two_chapter_arc_setup(tmp_path)
+    # give chapter 1 three beats; all must reach the writer context
+    provider.responses["outliner"] = Outline(arcs=[Arc(arc_name="卷一", chapters=[
+        ChapterOutline(chapter_no=1, chapter_title="T1", beats=[
+            ChapterBeat(pov="Ara", setting="t", event=f"multi-{j}", emotional_turn="d",
+                        characters=["c1"]) for j in (1, 2, 3)]),
+        ChapterOutline(chapter_no=2, chapter_title="T2", beats=[ChapterBeat(
+            pov="Ara", setting="t", event="event-2", emotional_turn="d", characters=["c1"])]),
+    ])])
+    run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                      proj=proj, premise="a thief", target_chapters=1,
+                      language="zh", chapter_target_length=3000)
+    ctx0 = provider.writer_contexts[0]
+    assert "[Beats" in ctx0 and "[Target length] 本章目标约 3000 字" in ctx0
+    assert all(f"event=multi-{j}" in ctx0 for j in (1, 2, 3))  # ALL beats, not just beats[0]
+    assert "[Arc summary]" not in ctx0   # no arc summary yet (Task 12 adds them)
+
+
+def test_summary_lazy_backfill(tmp_path):
+    from novel.store.summaries import SummaryStore
+    proj, bible, vector, provider = _two_chapter_arc_setup(tmp_path)
+    state1 = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                               proj=proj, premise="a thief", target_chapters=1)
+    assert state1.error is None
+    SummaryStore(proj)._chapter_path(1).unlink()      # simulate a lost summary
+    provider.responses["summarizer"] = {
+        "chapter_no": 1, "arc_name": "卷一", "summary": "补生成的第一章摘要。",
+        "characters_involved": [], "threads_advanced": []}
+    state2 = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                               proj=proj, premise="", target_chapters=2, start_chapter=2,
+                               min_chapter_chars=10)  # canned prose is 19 chars; ch1 has a
+    # passed review on disk, so with the default threshold of 50 the backfill's
+    # is_chapter_complete guard would (wrongly for this scenario) see it as incomplete
+    assert state2.error is None
+    assert SummaryStore(proj).get_chapter_summary(1).summary == "补生成的第一章摘要。"
+
+
+def test_continuity_receives_compact_view_not_canonical(tmp_path):
+    captured: list[dict[str, object]] = []
+
+    class _RecordingContinuity(_RecordingWriterProvider):
+        def complete(self, messages, cfg, *, seed=None):
+            if any(m.get("agent") == "continuity" for m in messages):
+                captured.append(messages[-1])
+            return super().complete(messages, cfg, seed=seed)
+
+    proj, bible, vector, concept, beat, _o, chars = _one_chapter_setup(tmp_path)
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
+    provider = _RecordingContinuity({
+        "strategist": concept, "worldbuilder": World(setting="city"), "character": chars,
+        "outliner": Outline(arcs=[Arc(arc_name="卷一", chapters=[
+            ChapterOutline(chapter_no=1, chapter_title="T1", beats=[beat])])]),
+        "writer": "Chapter prose text.", "continuity": "[]", "editor": "x",
+        "scorer": passing,
+        "extractor": {"character_states": {}, "voice_samples": {}, "mannerisms_used": {},
+                      "key_events": [], "threads_advanced": [], "new_information_revealed": []}})
+    run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                      proj=proj, premise="a thief", target_chapters=1)
+    user = str(captured[0]["content"])
+    assert "[Character" in user        # compact view carries the character card
+    assert "_canonical" not in user and '"logline"' not in user   # NOT the raw canonical JSON
