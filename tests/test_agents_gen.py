@@ -101,6 +101,14 @@ def test_editor_prompts_match_spec_shape():
     assert EDITOR_USER.strip() == "{prose}"
 
 
+def test_writer_prompt_references_ladder_blocks_and_no_hardcoded_length():
+    from novel.agents.writer import WRITER_SYSTEM
+    assert "1,800" not in WRITER_SYSTEM
+    for marker in ("[Beats]", "[Arc summary]", "[Recent chapter summaries]",
+                   "[Book digest]", "[Target length]"):
+        assert marker in WRITER_SYSTEM
+
+
 def test_continuity_retry_appends_v2_retry_text():
     # ContinuityAgent.run retries on invalid JSON; the retry user message must be
     # CONTINUITY_RETRY.format(error=e) verbatim from spec §7.
