@@ -113,6 +113,8 @@ def _detail_arc(provider: ModelProvider, cfg_map: dict[str, ModelConfig],
     # defensive renumbering: model output numbers are advisory only (spec §4.3)
     for i, ch in enumerate(arc.chapters):
         ch.chapter_no = next_chapter_no + i
+    # adopt the skeleton's name — model output is advisory only (spec §4.3)
+    arc.arc_name = skeleton.arc_name
     return arc
 
 

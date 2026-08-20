@@ -149,14 +149,17 @@ def run_full_pipeline(
         if chapter_no < 2:
             return
         prev = chapter_no - 1
-        if summaries.get_chapter_summary(prev) is None and \
-                is_chapter_complete(proj, reviews, prev, min_chapter_chars):
-            prev_prose = (proj.root / "chapters" / f"{prev:03d}.md").read_text(encoding="utf-8")
-            prev_arc = flat[prev - 1][0] if prev - 1 < len(flat) else ""
-            cs = summarize_chapter(prev, prev_prose, prev_arc, provider, agent("extractor"))
-            cs.prose_sha256 = sha256_text(prev_prose)
-            summaries.put_chapter_summary(cs)
-            emit({"type": "stage", "stage": "summary_backfill", "chapter": prev})
+        try:
+            if summaries.get_chapter_summary(prev) is None and \
+                    is_chapter_complete(proj, reviews, prev, min_chapter_chars):
+                prev_prose = (proj.root / "chapters" / f"{prev:03d}.md").read_text(encoding="utf-8")
+                prev_arc = flat[prev - 1][0] if prev - 1 < len(flat) else ""
+                cs = summarize_chapter(prev, prev_prose, prev_arc, provider, agent("extractor"))
+                cs.prose_sha256 = sha256_text(prev_prose)
+                summaries.put_chapter_summary(cs)
+                emit({"type": "stage", "stage": "summary_backfill", "chapter": prev})
+        except Exception:  # noqa: BLE001 - a failed backfill must not kill the run
+            emit({"type": "warning", "warning": "summary_backfill_failed", "chapter": prev})
 
     idx = start_chapter - 1
     while True:
@@ -264,12 +267,16 @@ def run_full_pipeline(
             involved = [c for c in (bible.get_character(i) for i in involved_ids) if c is not None]
             upd = extract_updates(chapter_no, prose, involved, provider, agent("extractor"))
             bible.apply_chapter_updates(chapter_no, upd, beats)
-            summaries.put_chapter_summary(ChapterSummary(
-                chapter_no=chapter_no, arc_name=arc_name,
-                summary=(upd.chapter_summary or prose[:300]).strip(),
-                characters_involved=list(upd.character_states.keys()),
-                threads_advanced=upd.threads_advanced,
-                prose_sha256=sha256_text(prose)))
+            try:
+                summaries.put_chapter_summary(ChapterSummary(
+                    chapter_no=chapter_no, arc_name=arc_name,
+                    summary=(upd.chapter_summary or prose[:300]).strip(),
+                    characters_involved=list(upd.character_states.keys()),
+                    threads_advanced=upd.threads_advanced,
+                    prose_sha256=sha256_text(prose)))
+            except Exception:  # noqa: BLE001 - a failed summary write must not kill the run
+                emit({"type": "warning", "warning": "chapter_summary_write_failed",
+                      "chapter": chapter_no})
             vector.add_chapter(chapter_no, prose)
             vector.add_summary("chapter", f"ch{chapter_no}", upd.chapter_summary or prose[:300])
             # atomic write last: the file's appearance is the chapter's commit point
