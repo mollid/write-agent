@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+import re
 from dataclasses import dataclass, field
 
 from novel.models import ChapterBeat, ForeshadowStatus
@@ -10,9 +12,19 @@ from novel.store.vector import VectorMemory
 
 PREV_ENDING_CHARS = 600  # tail of chapter N-1 injected as a continuity reference
 
+_CJK_RE = re.compile(
+    r"[\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
+    r"\u3000-\u303f\uff00-\uffef]"
+)
+
 
 def estimate_tokens(text: str) -> int:
-    return max(1, len(text) // 3)
+    """CJK-aware and deliberately conservative: CJK chars count as 1.5 tokens,
+    everything else as 4 chars per token. Over-estimating truncates earlier,
+    which is safe; the old len//3 heuristic under-counted Chinese ~3x."""
+    cjk = len(_CJK_RE.findall(text))
+    other = len(text) - cjk
+    return max(1, math.ceil(other / 4) + math.ceil(cjk * 1.5))
 
 
 @dataclass

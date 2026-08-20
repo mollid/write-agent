@@ -43,7 +43,7 @@ def test_assemble_respects_token_budget_and_records_drops(tmp_path):
     proj, b, vm, beat = _seed(tmp_path)
     ctx = assemble_context(beat=beat, bible=b, vector=vm, proj=proj, token_budget=20)
     assert ctx.tokens <= 20 or ctx.dropped  # either fits or something dropped
-    assert estimate_tokens("x" * 300) == 100
+    assert estimate_tokens("x" * 300) == 75
 
 def test_assemble_includes_events_and_threads(tmp_path):
     proj, b, vm, beat = _seed(tmp_path)
@@ -90,3 +90,13 @@ def test_new_memory_blocks_yield_to_core_blocks_under_tight_budget(tmp_path):
     ctx = assemble_context(beat=beat, bible=b, vector=vm, proj=proj, token_budget=300)
     if "Style directives" not in ctx.text:
         assert "style_notes" in ctx.dropped
+
+
+def test_estimate_tokens_cjk_aware():
+    # pure ASCII: 4 chars per token
+    assert estimate_tokens("x" * 300) == 75
+    # pure CJK: 1.5 tokens per char (conservative)
+    assert estimate_tokens("钟" * 100) == 150
+    # mixed: ascii part + cjk part computed independently, min 1
+    assert estimate_tokens("abcd" + "钟" * 10) == 1 + 15
+    assert estimate_tokens("") == 1
