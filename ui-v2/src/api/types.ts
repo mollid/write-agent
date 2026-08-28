@@ -91,3 +91,25 @@ export interface BibleData {
   events: EventData[];
 }
 export type SseEvent = Record<string, unknown> & { type: string; job_id?: string };
+
+export interface ChatSessionSummary {
+  id: string;
+  title: string;
+  created: string;
+  entries: number;
+}
+
+export interface ChatEntry {
+  seq: number;
+  ts: string;
+  type: "user" | "assistant" | "action" | "system";
+  text?: string;
+  action?: { type: string; args: Record<string, unknown> };
+  job_id?: string;
+}
+
+export interface ChatTurnResponse {
+  reply: string;
+  action: { type: string; args: Record<string, unknown> } | null;
+  job_id: string | null;
+}

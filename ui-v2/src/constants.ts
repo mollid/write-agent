@@ -69,5 +69,18 @@ export const TTS_VOICE_NAMES: Record<string, string> = {
   "zh-CN-YunxiaNeural": "云夏（男 · 少年）",
 };
 
+/** Work 模式聊天里 action 卡片的动作中文名（与后端 chat 路由的动作枚举对应）。 */
+export const CHAT_ACTION_LABELS: Record<string, string> = {
+  write_premise: "生成故事前提",
+  run_setup: "分阶段设定",
+  write_chapters: "撰写章节",
+  rewrite_chapter: "改写章节",
+  edit_bible: "编辑设定",
+  extend_outline: "扩展大纲",
+  run_tts: "语音合成",
+  wait_job: "等待任务",
+  none: "无动作",
+};
+
 /** API 路径构造。 */
 export const p = (n: string): string => `/api/projects/${n}`;

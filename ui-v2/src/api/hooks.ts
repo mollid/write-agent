@@ -4,6 +4,9 @@ import { p } from "../constants";
 import type {
   AudioInfo,
   BibleData,
+  ChatEntry,
+  ChatSessionSummary,
+  ChatTurnResponse,
   OutlineInfo,
   ProjectConfig,
   ProjectStatus,
@@ -298,5 +301,43 @@ export function useTts(name: string) {
         method: "POST",
         body: JSON.stringify(vars),
       }),
+  });
+}
+
+// ---------- Work 模式聊天 ----------
+
+export function useChatSessions(name: string | undefined) {
+  return useQuery({
+    queryKey: ["chat-sessions", name],
+    queryFn: () => api<ChatSessionSummary[]>(`${p(name!)}/chat/sessions`),
+    enabled: !!name,
+  });
+}
+
+export function useCreateChatSession(name: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<{ session_id: string }>(`${p(name)}/chat/sessions`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["chat-sessions", name] }),
+  });
+}
+
+export function useChatEntries(name: string, sid: string | null) {
+  return useQuery({
+    queryKey: ["chat-entries", name, sid],
+    queryFn: () => api<{ session_id: string; entries: ChatEntry[] }>(`${p(name)}/chat/sessions/${sid}`),
+    enabled: !!name && !!sid,
+  });
+}
+
+export function useSendChatMessage(name: string, sid: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (text: string) =>
+      api<ChatTurnResponse>(`${p(name)}/chat/sessions/${sid}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["chat-entries", name, sid] }),
   });
 }
