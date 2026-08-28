@@ -90,6 +90,18 @@ test("sending a message posts and shows the reply", async () => {
     expect(screen.getAllByText("已完成").length).toBeGreaterThan(0));
 });
 
+test("sending renders the optimistic user bubble alongside the reply", async () => {
+  // 默认 stub 的 GET 条目在 POST 后不变(服务端记录尚未刷新进来):
+  // 用户气泡与回复都必须靠乐观渲染可见(spec §4.5)
+  stubChatFetch();
+  renderWork();
+  fireEvent.change(await screen.findByTestId("chat-input"), { target: { value: "继续" } });
+  fireEvent.click(await screen.findByTestId("chat-send"));
+  await waitFor(() =>
+    expect(screen.getAllByText("已完成").length).toBeGreaterThan(0));
+  expect(screen.getAllByText("继续").length).toBeGreaterThan(0);
+});
+
 test("switching sessions does not leak the previous session's reply", async () => {
   stubChatFetch({
     sessions: [
