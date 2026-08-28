@@ -9,6 +9,7 @@ import {
   useSendChatMessage,
 } from "../api/hooks";
 import { CHAT_ACTION_LABELS } from "../constants";
+import { pageTitle } from "../theme";
 
 /** Work 模式:计划驱动的对话编排。进度与门禁由 Shell 的 JobStrip/GateModal
  * 呈现(跨页复用),本页只负责会话与消息流。 */
@@ -80,7 +81,7 @@ export default function Work() {
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }} data-testid="page-work">
-      <Typography.Title level={4} style={{ margin: 0 }}>
+      <Typography.Title level={4} style={pageTitle}>
         对话(Work)
       </Typography.Title>
       <Card size="small" title="会话" extra={
@@ -98,7 +99,7 @@ export default function Work() {
           rowKey={(s) => s.id}
           renderItem={(s) => (
             <List.Item style={{ cursor: "pointer", padding: "4px 8px",
-                                background: s.id === sid ? "#f5f5f5" : undefined }}
+                                background: s.id === sid ? "#FAFAFA" : undefined }}
               onClick={() => setSid(s.id)}>
               <Typography.Text ellipsis style={{ maxWidth: 240 }}>{s.title}</Typography.Text>
             </List.Item>
@@ -117,16 +118,16 @@ export default function Work() {
               renderItem={(e) => {
                 if (e.type === "user")
                   return <Typography.Paragraph style={{ textAlign: "right" }}>
-                    <Typography.Text style={{ background: "#e6f4ff", padding: "4px 10px", borderRadius: 6 }}>
+                    <Typography.Text style={{ background: "#F1E4FB", padding: "4px 10px", borderRadius: 6 }}>
                       {e.text}
                     </Typography.Text>
                   </Typography.Paragraph>;
                 if (e.type === "assistant")
                   return <Typography.Paragraph>{e.text}</Typography.Paragraph>;
                 if (e.type === "action")
-                  return <Card size="small" style={{ margin: "6px 0", background: "#fafafa" }}>
+                  return <Card size="small" style={{ margin: "6px 0", background: "#FAFAFA" }}>
                     <Space wrap>
-                      <Tag color="blue">{CHAT_ACTION_LABELS[e.action?.type ?? ""] ?? e.action?.type}</Tag>
+                      <Tag color="#8848F9">{CHAT_ACTION_LABELS[e.action?.type ?? ""] ?? e.action?.type}</Tag>
                       <Typography.Text code>{JSON.stringify(e.action?.args ?? {})}</Typography.Text>
                       {e.job_id ? (
                         <Link to={`/p/${name}/generate`}>查看任务 →</Link>
@@ -138,7 +139,7 @@ export default function Work() {
             />
             {pendingUser && pendingUser.sid === sid ? (
               <Typography.Paragraph style={{ textAlign: "right" }}>
-                <Typography.Text style={{ background: "#e6f4ff", padding: "4px 10px", borderRadius: 6 }}>
+                <Typography.Text style={{ background: "#F1E4FB", padding: "4px 10px", borderRadius: 6 }}>
                   {pendingUser.text}
                 </Typography.Text>
               </Typography.Paragraph>

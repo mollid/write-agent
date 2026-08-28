@@ -1,4 +1,5 @@
 import type { ReviewRecord } from "../api/types";
+import { tokens } from "../theme";
 
 /** Last-attempt overall score per chapter, ascending chapter order. */
 export function trendPoints(records: ReviewRecord[]): { x: number; y: number }[] {
@@ -27,12 +28,12 @@ export function Trend({ points }: { points: { x: number; y: number }[] }) {
     <svg data-testid="score-trend" width={w} height={h} role="img" aria-label="各章总分趋势">
       <polyline
         fill="none"
-        stroke="#1677ff"
+        stroke={tokens.brand}
         strokeWidth="2"
         points={points.map((p, i) => `${xs(i)},${ys(p.y)}`).join(" ")}
       />
       {points.map((p, i) => (
-        <circle key={p.x} cx={xs(i)} cy={ys(p.y)} r="3" />
+        <circle key={p.x} cx={xs(i)} cy={ys(p.y)} r="3" fill={tokens.brand} />
       ))}
     </svg>
   );

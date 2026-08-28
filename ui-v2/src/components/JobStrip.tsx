@@ -40,7 +40,7 @@ export default function JobStrip({ project }: { project: string }) {
     <Alert
       data-testid="job-strip"
       className={pulsing ? "job-strip-pulse" : undefined}
-      type={gate ? "warning" : "info"}
+      type="info"
       showIcon
       message={
         <Space wrap>
@@ -49,7 +49,7 @@ export default function JobStrip({ project }: { project: string }) {
           {stageText ? (
             <Tag data-testid="job-stage">{stageText}</Tag>
           ) : null}
-          {gate ? <Tag color="orange">{gate.label}</Tag> : null}
+          {gate ? <Tag>{gate.label}</Tag> : null}
           {gate && dismissed ? (
             <Button size="small" type="primary" data-testid="reopen-gate" onClick={reopenGate}>
               打开审批
@@ -60,7 +60,7 @@ export default function JobStrip({ project }: { project: string }) {
               章节 {Math.min(progress.done, progress.total)}/{progress.total}
             </Tag>
           ) : null}
-          {!connected && <Tag color="red">连接断开，重连中…</Tag>}
+          {!connected && <Tag color="error">连接断开，重连中…</Tag>}
           <Button size="small" onClick={() => navigate(`/p/${project}/generate`)}>
             查看进度
           </Button>

@@ -16,6 +16,7 @@ import { useMode, useProjects } from "./api/hooks";
 import { useProjectEvents } from "./api/events";
 import JobStrip from "./components/JobStrip";
 import GateModal from "./components/GateModal";
+import { theme as designTheme, tokens } from "./theme";
 import Projects from "./pages/Projects";
 import Overview from "./pages/Overview";
 import Setup from "./pages/Setup";
@@ -66,7 +67,7 @@ function Shell() {
   return (
     <Layout style={{ height: "100%" }}>
       <Layout.Sider
-        width={200}
+        width={255}
         theme="light"
         breakpoint="lg"
         collapsible
@@ -82,7 +83,10 @@ function Shell() {
           aria-label="返回项目列表"
           style={{
             padding: 16,
+            // 品牌名 Title-L：18px SemiBold Ink（DESIGN.md · Typography）
+            fontSize: 18,
             fontWeight: 600,
+            color: tokens.ink,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -116,8 +120,10 @@ function Shell() {
       <Layout>
         <Layout.Header
           style={{
-            background: "#fff",
-            paddingInline: 16,
+            background: tokens.surface,
+            // 顶栏底部 1px 分隔线（DESIGN.md · Layout，⟡推导）
+            borderBottom: `1px solid ${tokens.border}`,
+            paddingInline: 24,
             display: "flex",
             alignItems: "center",
             gap: 12,
@@ -130,11 +136,11 @@ function Shell() {
             options={projects.map((p) => ({ value: p.name, label: p.name }))}
             onChange={(v) => navigate(`/p/${v}/overview`)}
           />
-          <Tag color={mode?.live ? "green" : "default"}>
+          <Tag color={mode?.live ? "success" : "default"}>
             {mode?.live ? "真实模型模式" : "演示模式"}
           </Tag>
         </Layout.Header>
-        <div style={{ padding: "0 16px" }}>
+        <div style={{ padding: "0 24px" }}>
           {name ? (
             <>
               <JobStrip project={name} />
@@ -142,7 +148,7 @@ function Shell() {
             </>
           ) : null}
         </div>
-        <Layout.Content style={{ padding: 16, overflow: "auto" }}>
+        <Layout.Content style={{ padding: 24, overflow: "auto" }}>
           <Outlet />
         </Layout.Content>
       </Layout>
@@ -153,7 +159,7 @@ function Shell() {
 export default function App() {
   return (
     <QueryClientProvider client={qc}>
-      <ConfigProvider locale={zhCN}>
+      <ConfigProvider locale={zhCN} theme={designTheme}>
         <AntApp>
           <BrowserRouter>
             <Routes>

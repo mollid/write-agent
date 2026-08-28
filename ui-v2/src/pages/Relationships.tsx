@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useBible } from "../api/hooks";
 import { RelationGraph, buildGraph, roleColor } from "../components/RelationGraph";
+import { pageTitle, tokens } from "../theme";
 
 /** 人物关系图谱：节点=人物（大小按关系数，颜色按角色），边=关系描述
  * （静态设定 + 最新章节演化，共同出场次数决定粗细）。点击节点看人物卡。 */
@@ -16,7 +17,7 @@ export default function Relationships() {
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }} data-testid="page-relationships">
-      <Typography.Title level={4} style={{ margin: 0 }}>
+      <Typography.Title level={4} style={pageTitle}>
         人物关系图谱
       </Typography.Title>
       {graph.nodes.length === 0 ? (
@@ -34,9 +35,9 @@ export default function Relationships() {
             />
             <Space wrap style={{ marginTop: 8 }}>
               {[
-                ["主角", "主角/主人公"],
-                ["反派", "反派/宿敌"],
-                ["配角", "配角/盟友"],
+                [tokens.brand, "主角/主人公"],
+                [tokens.negative, "反派/宿敌"],
+                [tokens.steel, "配角/盟友"],
               ].map(([color, text]) => (
                 <Tag key={text} color={color}>
                   {text}
@@ -50,7 +51,9 @@ export default function Relationships() {
             {selectedChar ? (
               <>
                 <Space style={{ marginBottom: 8 }}>
-                  <Tag color="gold">{selectedChar.role}</Tag>
+                  <Tag style={{ background: tokens.brandTint, borderColor: "transparent", color: tokens.graphite }}>
+                    {selectedChar.role}
+                  </Tag>
                   <Typography.Text strong>{selectedChar.name}</Typography.Text>
                 </Space>
                 <Descriptions

@@ -1,9 +1,61 @@
 html, body, #root { height: 100%; margin: 0; }
-body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
 
-/* F2: brief highlight when the Generate 409 CTA points at the JobStrip. */
+/*
+ * 设计 token —— 唯一来源：仓库根目录 DESIGN.md（非 AntD 场景直接取用）。
+ * 颜色禁令：不渐变、不霓虹、不引入第二个强调色。
+ */
+:root {
+  --canvas: #FAFAFA;
+  --surface: #FFFFFF;
+  --ink: #0A0A0A;
+  --graphite: #202020;
+  --ink-60: rgba(10, 10, 10, 0.6);
+  --steel: #7F7F7F;
+  --line: #E5E5E5;
+  --border: #E0DFDF;
+  --border-2: #E2E2E2;
+  --icon: #171717;
+  --brand: #8848F9;
+  --brand-tint: #F1E4FB;
+  --brand-track: rgba(136, 72, 249, 0.2);
+  --positive: #00A63E;
+  --negative: #F4165F;
+  --radius-control: 6px;
+  --radius-card: 12px;
+  --radius-pill: 999px;
+  --shadow-card: 0 1px 2px -1px rgba(0, 0, 0, 0.1), 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+  --sidebar-w: 255px;
+  --topbar-h: 64px;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-6: 24px;
+}
+
+body {
+  font-family: Inter, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--graphite);
+}
+
+/* F2: brief highlight when the Generate 409 CTA points at the JobStrip.
+ * 品牌紫光圈（DESIGN.md 单强调色原则，原为 AntD 橙）。 */
 @keyframes strip-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(250, 173, 20, 0); }
-  50% { box-shadow: 0 0 0 6px rgba(250, 173, 20, 0.45); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(136, 72, 249, 0); }
+  50% { box-shadow: 0 0 0 6px rgba(136, 72, 249, 0.35); }
 }
 .job-strip-pulse { animation: strip-pulse 0.75s ease-in-out 2; }
+
+/* 数值等宽（DESIGN.md · 排印规则） */
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* 首页项目卡：只动 transform，150ms ease-out；焦点可见（2px 品牌紫环） */
+.project-card {
+  transition: transform 150ms ease-out;
+}
+.project-card:hover { transform: translateY(-2px); }
+.project-card:active { transform: translateY(0); }
+.project-card:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .project-card { transition: none; }
+  .project-card:hover, .project-card:active { transform: none; }
+}

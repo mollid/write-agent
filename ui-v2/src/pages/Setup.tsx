@@ -5,6 +5,7 @@ import { useMode, usePremise, useSetup, useStatus } from "../api/hooks";
 import { useEvents } from "../stores/events";
 import { SETUP_STAGE_NAMES } from "../constants";
 import { ArtifactView } from "../components/ArtifactView";
+import { pageTitle } from "../theme";
 
 /** Task 6: R1 Step 0 (premise) + R5 structured stage artifacts.
  * Per-stage approval lives in the global GateModal — this page only reflects
@@ -95,7 +96,7 @@ export default function Setup() {
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }} data-testid="page-setup">
-      <Typography.Title level={4} style={{ margin: 0 }}>
+      <Typography.Title level={4} style={pageTitle}>
         分阶段设定
       </Typography.Title>
       {/* R6: honest demo notice — persistent while on the page */}

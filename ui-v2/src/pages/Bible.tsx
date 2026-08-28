@@ -33,6 +33,7 @@ import { useEvents } from "../stores/events";
 import { BIBLE_SECTION_NAMES } from "../constants";
 import BibleChat from "../components/BibleChat";
 import DiffView from "../components/DiffView";
+import { pageTitle } from "../theme";
 import type {
   BibleData,
   CharacterData,
@@ -222,12 +223,10 @@ function OutlineArcsView({ data }: { data: OutlineFullData | null }) {
                           （{b.pov} · {b.emotional_turn}）
                         </Typography.Text>{" "}
                         {b.plants.map((id) => (
-                          <Tag key={`p-${id}`} color="orange">
-                            埋设 {id}
-                          </Tag>
+                          <Tag key={`p-${id}`}>埋设 {id}</Tag>
                         ))}
                         {b.payoffs.map((id) => (
-                          <Tag key={`y-${id}`} color="green">
+                          <Tag key={`y-${id}`} color="success">
                             回收 {id}
                           </Tag>
                         ))}
@@ -437,7 +436,7 @@ export default function Bible() {
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }} data-testid="page-bible">
-      <Typography.Title level={4} style={{ margin: 0 }}>
+      <Typography.Title level={4} style={pageTitle}>
         设定库
       </Typography.Title>
       {mode && !mode.live && (

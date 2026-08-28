@@ -3,6 +3,7 @@ import { App as AntApp, Alert, Button, Card, InputNumber, Progress, Space, Tag, 
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiError } from "../api/client";
+import { pageTitle } from "../theme";
 import {
   useCancelJob,
   useMode,
@@ -119,7 +120,7 @@ export default function Generate() {
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }} data-testid="page-generate">
-      <Typography.Title level={4} style={{ margin: 0 }}>
+      <Typography.Title level={4} style={pageTitle}>
         生成章节
       </Typography.Title>
 

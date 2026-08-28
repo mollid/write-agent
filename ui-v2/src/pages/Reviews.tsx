@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { useReviews } from "../api/hooks";
 import type { ReviewRecord } from "../api/types";
 import { Trend, trendPoints } from "../components/Trend";
+import { pageTitle } from "../theme";
 
 /** Group reviews by chapter; groups and attempts both newest-first (ISO
  * timestamps compare lexicographically; attempt number breaks ties). */
@@ -29,7 +30,7 @@ export default function Reviews() {
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }} data-testid="page-reviews">
-      <Typography.Title level={4} style={{ margin: 0 }}>
+      <Typography.Title level={4} style={pageTitle}>
         评分历史
       </Typography.Title>
       {isFetched && records.length === 0 ? (
@@ -53,8 +54,8 @@ export default function Reviews() {
                 label: (
                   <Space wrap>
                     <Typography.Text strong>第 {ch} 章</Typography.Text>
-                    <Tag color={final.passed ? "green" : "red"}>
-                      最终 {final.overall} 分 {final.passed ? "✅" : "❌"}
+                    <Tag color={final.passed ? "success" : "error"}>
+                      最终 {final.overall} 分
                     </Tag>
                     <Tag>{attempts.length} 次评分</Tag>
                   </Space>

@@ -3,9 +3,9 @@ import { useParams } from "react-router-dom";
 import { useThreads } from "../api/hooks";
 
 const STATUS_META: Record<string, { color: string; text: string }> = {
-  open: { color: "orange", text: "待埋设" },
-  planted: { color: "blue", text: "已埋设" },
-  paid_off: { color: "green", text: "已回收" },
+  open: { color: "default", text: "待埋设" },
+  planted: { color: "processing", text: "已埋设" },
+  paid_off: { color: "success", text: "已回收" },
 };
 const meta = (s: string) => STATUS_META[s] ?? { color: "default", text: s };
 

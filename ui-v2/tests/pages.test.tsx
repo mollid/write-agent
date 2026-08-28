@@ -670,11 +670,11 @@ test("Reviews: groups by chapter, final badge + attempts with text scores (not c
   stubFetchFor({ reviews: REVIEWS });
   renderPage(<Reviews />, "/p/:name/reviews");
 
-  // chapter headers with summary badges
+  // chapter headers with summary badges (DESIGN.md: badges are text-only, no emoji icons)
   expect(await screen.findByText("第 1 章")).toBeInTheDocument();
-  expect(screen.getByText("最终 85 分 ✅")).toBeInTheDocument();
+  expect(screen.getByText("最终 85 分")).toBeInTheDocument();
   expect(screen.getByText("2 次评分")).toBeInTheDocument();
-  expect(screen.getByText("最终 90 分 ✅")).toBeInTheDocument();
+  expect(screen.getByText("最终 90 分")).toBeInTheDocument();
   // attempts in order, pass/fail as words + icon
   const a1 = await screen.findByTestId("review-attempt-1-1");
   expect(a1).toHaveTextContent("未通过 ❌");

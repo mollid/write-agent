@@ -67,10 +67,11 @@ export function buildGraph(bible: BibleData): { nodes: GraphNode[]; edges: Graph
   return { nodes, edges };
 }
 
+// 角色配色取自 DESIGN.md 调色板：品牌紫（主角）、语义红（反派）、中灰（配角）
 const ROLE_COLORS: [RegExp, string][] = [
-  [/主角|主人公|视图主角|protagonist/i, "#faad14"],
-  [/反派|宿敌|对手|antagonist|villain/i, "#ff7875"],
-  [/配角|盟友|导师|ally|mentor|support/i, "#69b1ff"],
+  [/主角|主人公|视图主角|protagonist/i, "#8848F9"],
+  [/反派|宿敌|对手|antagonist|villain/i, "#F4165F"],
+  [/配角|盟友|导师|ally|mentor|support/i, "#7F7F7F"],
 ];
 export const roleColor = (role: string): string =>
   ROLE_COLORS.find(([re]) => re.test(role))?.[1] ?? "#8c8c8c";

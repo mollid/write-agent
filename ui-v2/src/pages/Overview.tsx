@@ -1,6 +1,7 @@
 import { Button, Card, Col, Row, Space, Tag, Typography } from "antd";
 import { Link, useParams } from "react-router-dom";
 import { useStatus } from "../api/hooks";
+import { pageTitle } from "../theme";
 
 const JOB_KINDS: Record<string, string> = {
   premise: "创意生成",
@@ -30,7 +31,7 @@ export default function Overview() {
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }} data-testid="page-overview">
-      <Typography.Title level={4} style={{ margin: 0 }}>
+      <Typography.Title level={4} style={pageTitle}>
         概览 · {name}
       </Typography.Title>
 
@@ -51,13 +52,13 @@ export default function Overview() {
         <Col xs={24} md={12} lg={6}>
           <Card size="small" title="设定">
             <Space wrap>
-              <Tag color={status.has_concept ? "green" : "default"}>
+              <Tag color={status.has_concept ? "success" : "default"}>
                 {status.has_concept ? "✓ 概念已生成" : "概念未生成"}
               </Tag>
-              <Tag color={status.has_world ? "green" : "default"}>
+              <Tag color={status.has_world ? "success" : "default"}>
                 {status.has_world ? "✓ 世界观已构建" : "世界观未构建"}
               </Tag>
-              <Tag color={status.has_outline ? "green" : "default"}>
+              <Tag color={status.has_outline ? "success" : "default"}>
                 {status.has_outline ? "✓ 大纲已编排" : "大纲未编排"}
               </Tag>
             </Space>
