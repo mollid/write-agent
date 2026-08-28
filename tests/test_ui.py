@@ -519,3 +519,58 @@ def test_run_setup_job_two_phase_when_target_chapters_configured(tmp_path: Path)
         assert [s.arc_name for s in outline.arc_plan] == ["第二卷"]  # queue ≠ one-shot
     finally:
         job.thread.join(timeout=5)
+
+
+# ---------- Work 模式聊天(spec §4.4)----------
+
+class _OrchestratorAction:
+    """Canned orchestrator decisions injected via monkeypatched make_provider."""
+
+    def __init__(self, action: dict | None) -> None:
+        from novel.providers import FakeProvider
+        self.provider = FakeProvider(
+            {"orchestrator": {"reply": "收到", "action": action}})
+
+
+def test_chat_session_crud(client: TestClient) -> None:
+    client.post("/api/projects", json={"name": "cp"})
+    r = client.post("/api/projects/cp/chat/sessions")
+    assert r.status_code == 201
+    sid = r.json()["session_id"]
+    assert [s["id"] for s in client.get("/api/projects/cp/chat/sessions").json()] == [sid]
+    assert client.get("/api/projects/cp/chat/sessions/nosuch").status_code == 404
+
+
+def test_chat_turn_dispatch_and_history(client: TestClient,
+                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    from novel.ui import chat as chat_mod
+    monkeypatch.setattr(chat_mod, "make_provider",
+                        lambda cfg, skills=None: _OrchestratorAction(
+                            {"type": "write_premise", "args": {"text": "一个关于时间小偷的故事"}}).provider)
+    client.post("/api/projects", json={"name": "cp2"})
+    sid = client.post("/api/projects/cp2/chat/sessions").json()["session_id"]
+    r = client.post(f"/api/projects/cp2/chat/sessions/{sid}/messages", json={"text": "开始"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["reply"] == "收到" and body["job_id"]
+    job = _wait_job(client, body["job_id"])
+    assert job["status"] == "done"
+    data = client.get(f"/api/projects/cp2/chat/sessions/{sid}").json()
+    kinds = [e["type"] for e in data["entries"]]
+    assert kinds[:3] == ["user", "assistant", "action"]
+    assert kinds[-1] == "system"
+    # premise 真的写进了 bible
+    status = client.get("/api/projects/cp2/status").json()
+    assert status["has_concept"] is True
+
+
+def test_chat_turn_invalid_action_422(client: TestClient,
+                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    from novel.ui import chat as chat_mod
+    monkeypatch.setattr(chat_mod, "make_provider",
+                        lambda cfg, skills=None: _OrchestratorAction(
+                            {"type": "write_premise", "args": {}}).provider)
+    client.post("/api/projects", json={"name": "cp3"})
+    sid = client.post("/api/projects/cp3/chat/sessions").json()["session_id"]
+    r = client.post(f"/api/projects/cp3/chat/sessions/{sid}/messages", json={"text": "开始"})
+    assert r.status_code == 422

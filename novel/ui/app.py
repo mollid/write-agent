@@ -69,6 +69,10 @@ class ChapterSaveReq(BaseModel):
     content: str = Field(min_length=1)
 
 
+class ChatSendReq(BaseModel):
+    text: str = Field(min_length=1)
+
+
 class ProjectConfigUpdateReq(BaseModel):
     """Exposed generation settings. null target_chapters clears the key
     (back to the one-shot outline); model credentials are never editable here."""
@@ -421,6 +425,40 @@ def create_app(root: Path) -> FastAPI:
         from novel.project import NovelProject
         out = export_markdown(NovelProject(root=p))
         return {"path": str(out)}
+
+    @app.post("/api/projects/{name}/chat/sessions", status_code=201)
+    def create_chat_session(name: str) -> dict[str, str]:
+        p = _safe_project(root, name)
+        from novel.ui.chat import ChatSessionStore
+        return {"session_id": ChatSessionStore(p).create()}
+
+    @app.get("/api/projects/{name}/chat/sessions")
+    def list_chat_sessions(name: str) -> list[dict[str, object]]:
+        p = _safe_project(root, name)
+        from novel.ui.chat import ChatSessionStore
+        return ChatSessionStore(p).list_sessions()
+
+    @app.get("/api/projects/{name}/chat/sessions/{sid}")
+    def get_chat_session(name: str, sid: str) -> dict[str, object]:
+        p = _safe_project(root, name)
+        from novel.ui.chat import ChatSessionStore
+        entries = ChatSessionStore(p).entries(sid)
+        if entries is None:
+            raise HTTPException(status_code=404, detail=f"会话不存在: {sid}")
+        return {"session_id": sid, "entries": entries}
+
+    @app.post("/api/projects/{name}/chat/sessions/{sid}/messages")
+    def send_chat_message(name: str, sid: str, req: ChatSendReq) -> dict[str, object]:
+        p = _safe_project(root, name)
+        from novel.ui import chat
+        try:
+            return chat.run_turn(p, name, sid, req.text, manager).model_dump()
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+        except RuntimeError as e:  # orchestrator decision failed
+            raise HTTPException(status_code=502, detail=str(e)) from e
 
     @app.get("/api/projects/{name}/events")
     async def project_events(name: str, request: Request) -> StreamingResponse:
