@@ -9,7 +9,7 @@ from novel.providers import FakeProvider, ModelProvider
 
 AGENT_NAMES = [
     "strategist", "worldbuilder", "character", "outliner", "writer",
-    "continuity", "editor", "scorer", "extractor", "setting_editor",
+    "continuity", "editor", "scorer", "extractor", "setting_editor", "orchestrator",
 ]
 
 
@@ -94,6 +94,7 @@ def make_provider(cfg: ProjectConfig, skills: list | None = None) -> ModelProvid
 
 
 def demo_provider() -> ModelProvider:
+    from novel.agents.orchestrator import OrchestratorDecision
     from novel.models import (
         ArcPlan,
         ArcSkeleton,
@@ -142,4 +143,7 @@ def demo_provider() -> ModelProvider:
         "scorer": passing,
         "extractor": {"character_states": {}, "voice_samples": {}, "mannerisms_used": {},
               "key_events": [], "threads_advanced": [], "new_information_revealed": []},
+        "orchestrator": OrchestratorDecision(
+            reply="演示模式:已读取当前工作流计划。要推进制作,请切换到 live 模式或在 Code 模式操作。",
+            action=None),
     }, arcs=arc_queue, tag_key="agent")
