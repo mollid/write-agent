@@ -101,10 +101,47 @@ def test_turn_rejects_when_job_active(tmp_path: Path) -> None:
 
 def test_turn_invalid_args_value_error(tmp_path: Path) -> None:
     root, manager, sid = _setup(tmp_path)
-    action = {"type": "write_premise", "args": {}}  # missing text
+    # write_chapters 是当前计划的 next_action(过了计划授权),但 n 越界 -> 参数校验拒绝
+    action = {"type": "write_chapters", "args": {"n": 0}}
     import pytest
     with pytest.raises(ValueError):
         run_turn(root, "p1", sid, "开始", manager, provider=_provider(action))
     entries = ChatSessionStore(root).entries(sid)
     assert entries is not None and entries[-1]["type"] == "system"
+    assert "动作未启动" in str(entries[-1]["text"])
     assert manager.active_job("p1") is None
+
+
+def test_turn_rejects_action_not_in_plan(tmp_path: Path) -> None:
+    """计划是唯一授权来源:零章项目上 rewrite_chapter 不在 next_action ∪
+    available_actions 里 -> 拒绝派发(API 422),不启动任何任务。"""
+    root, manager, sid = _setup(tmp_path)
+    action = {"type": "rewrite_chapter",
+              "args": {"chapter": 1, "mode": "polish", "instruction": "tighten"}}
+    import pytest
+    with pytest.raises(ValueError, match="未获计划授权"):
+        run_turn(root, "p1", sid, "把第 1 章润色一下", manager, provider=_provider(action))
+    entries = ChatSessionStore(root).entries(sid)
+    assert entries is not None and entries[-1]["type"] == "system"
+    assert "未获计划授权" in str(entries[-1]["text"])
+    assert "next_action=write_chapters" in str(entries[-1]["text"])
+    assert manager.active_job("p1") is None
+
+
+def test_turn_prompt_contains_user_message_once(tmp_path: Path) -> None:
+    """live 提示词里当前用户消息只出现一次(末尾 user 消息),history_tail 不再重复它。"""
+    root, manager, sid = _setup(tmp_path)
+
+    class _Recording(FakeProvider):
+        def __init__(self) -> None:
+            super().__init__({"orchestrator": _decision()})
+            self.seen: list[list[dict]] = []
+
+        def complete_structured(self, messages, schema, cfg, *, seed=None):
+            self.seen.append(messages)
+            return super().complete_structured(messages, schema, cfg, seed=seed)
+
+    prov = _Recording()
+    run_turn(root, "p1", sid, "你好呀", manager, provider=prov)
+    content = "\n".join(str(m.get("content", "")) for m in prov.seen[0])
+    assert content.count("你好呀") == 1

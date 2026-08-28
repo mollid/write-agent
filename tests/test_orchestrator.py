@@ -52,6 +52,15 @@ def test_messages_carry_agent_tag_and_plan() -> None:
     assert msgs[-1]["role"] == "user" and msgs[-1]["content"] == "继续"
 
 
+def test_system_prompt_renders_json_template_single_braces() -> None:
+    """占位符替换是 .replace(),模板必须用单花括号,否则 {{...}} 原样泄漏给模型。"""
+    provider = _Recording()
+    OrchestratorAgent(provider, CFG).run(_input())
+    system = str(provider.seen[0][0]["content"])
+    assert "{{" not in system
+    assert '{"reply"' in system
+
+
 def test_invalid_action_shape_exhausts_retries() -> None:
     canned = {"reply": "ok", "action": {"type": "write_chapters", "args": 123}}  # args must be dict
     agent = OrchestratorAgent(FakeProvider({"orchestrator": canned}), CFG)

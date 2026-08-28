@@ -442,7 +442,10 @@ def create_app(root: Path) -> FastAPI:
     def get_chat_session(name: str, sid: str) -> dict[str, object]:
         p = _safe_project(root, name)
         from novel.ui.chat import ChatSessionStore
-        entries = ChatSessionStore(p).entries(sid)
+        try:
+            entries = ChatSessionStore(p).entries(sid)
+        except ValueError as e:  # malformed sid ("..", etc.) -> 422, not 500
+            raise HTTPException(status_code=422, detail=str(e)) from e
         if entries is None:
             raise HTTPException(status_code=404, detail=f"会话不存在: {sid}")
         return {"session_id": sid, "entries": entries}

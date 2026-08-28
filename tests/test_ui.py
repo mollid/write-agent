@@ -574,3 +574,10 @@ def test_chat_turn_invalid_action_422(client: TestClient,
     sid = client.post("/api/projects/cp3/chat/sessions").json()["session_id"]
     r = client.post(f"/api/projects/cp3/chat/sessions/{sid}/messages", json={"text": "开始"})
     assert r.status_code == 422
+
+
+def test_chat_get_session_malformed_sid_422(client: TestClient) -> None:
+    """非法会话 id("..")在 GET 会话路由里是 422 而不是 500,与 POST 路由一致。"""
+    client.post("/api/projects", json={"name": "cp4"})
+    r = client.get("/api/projects/cp4/chat/sessions/%2E%2E")
+    assert r.status_code == 422

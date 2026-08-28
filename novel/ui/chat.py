@@ -164,12 +164,17 @@ def _watch_job_end(store: ChatSessionStore, session_id: str, job: Job) -> None:
 
 def run_turn(root: Path, project: str, session_id: str, text: str,
              manager: JobManager, *, provider: ModelProvider | None = None) -> TurnResult:
-    """Process one Work-mode turn (spec §5). Raises ValueError on invalid action
-    args (API 422), FileNotFoundError on unknown session, ValidationError upward
-    is converted to a system entry + RuntimeError."""
+    """Process one Work-mode turn (spec §5). Raises ValueError on an action the
+    plan does not authorize or on invalid action args (API 422), FileNotFoundError
+    on unknown session, ValidationError upward is converted to a system entry +
+    RuntimeError."""
     store = ChatSessionStore(root)
-    if store.entries(session_id) is None:
+    prior = store.entries(session_id)
+    if prior is None:
         raise FileNotFoundError(f"会话不存在: {session_id}")
+    # 先取历史再追加当前消息:live 提示词里用户消息只出现一次(history_tail + 末尾 user)
+    history_tail = [{"role": str(e["type"]), "text": str(e.get("text", ""))}
+                    for e in prior if e.get("type") in ("user", "assistant")][-HISTORY_TAIL:]
     store.append(session_id, {"type": "user", "text": text})
 
     proj = NovelProject(root=root)
@@ -182,9 +187,6 @@ def run_turn(root: Path, project: str, session_id: str, text: str,
 
     from novel.agents.orchestrator import OrchestratorAgent, OrchestratorInput
     prov = provider if provider is not None else make_provider(cfg, skills=load_skills(root))
-    history = [e for e in (store.entries(session_id) or [])
-               if e.get("type") in ("user", "assistant")][-HISTORY_TAIL:]
-    history_tail = [{"role": str(e["type"]), "text": str(e.get("text", ""))} for e in history]
     try:
         decision = OrchestratorAgent(prov, cfg.model_for("orchestrator")).run(
             OrchestratorInput(history_tail=history_tail, plan_json=plan.model_dump_json(),
@@ -201,6 +203,14 @@ def run_turn(root: Path, project: str, session_id: str, text: str,
             store.append(session_id, {"type": "system",
                                       "text": f"已有任务在运行(job {active.id}),本次动作未启动。"})
         else:
+            # 计划是唯一授权来源:next_action ∪ available_actions 之外的动作一律拒绝
+            # ("none"/"wait_job" 由上方分支排除,永远不会作为决策类型到达这里)
+            allowed = {plan.next_action.type, *plan.available_actions}
+            if decision.action.type not in allowed:
+                msg = (f"动作未获计划授权:{decision.action.type};"
+                       f"当前计划 next_action={plan.next_action.type}")
+                store.append(session_id, {"type": "system", "text": msg})
+                raise ValueError(msg)
             try:
                 kind, fn = _dispatch(root, decision.action.type, decision.action.args, bible)
             except ValueError as e:

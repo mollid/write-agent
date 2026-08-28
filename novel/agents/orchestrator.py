@@ -45,7 +45,7 @@ and the user's new message. You produce a short reply plus AT MOST ONE action.
 {history_block}
 
 ## Output
-Return ONLY the JSON object: {{"reply": str, "action": {{"type": str, "args": object}} | null}}"""
+Return ONLY the JSON object: {"reply": str, "action": {"type": str, "args": object} | null}"""
 
 
 class OrchestratorInput(BaseModel):
