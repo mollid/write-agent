@@ -76,10 +76,12 @@ def validate_tts_params(voice: str, rate: str, volume: str, pitch: str) -> None:
 
 
 def synth_to_file(text: str, voice: str, rate: str, volume: str, pitch: str,
-                  out_path: Path) -> None:
+                  out_path: Path, proxy: str | None = None) -> None:
     """Synthesize `text` to `out_path` (atomic replace); retry twice on failure.
 
     Runs in a Job thread: drive the asyncio API with asyncio.run per attempt.
+    `proxy` (from project config `network.proxy`) routes the Microsoft endpoint
+    through a local VPN/proxy; None = direct connection.
     """
     validate_tts_params(voice, rate, volume, pitch)
     last_err: Exception | None = None
@@ -89,7 +91,8 @@ def synth_to_file(text: str, voice: str, rate: str, volume: str, pitch: str,
             sink = _AudioSink(tmp)
 
             async def _run(sink: _AudioSink) -> None:
-                comm = edge_tts.Communicate(text, voice, rate=rate, volume=volume, pitch=pitch)
+                comm = edge_tts.Communicate(text, voice, rate=rate, volume=volume,
+                                            pitch=pitch, proxy=proxy)
                 await comm.save(sink)
 
             asyncio.run(_run(sink))

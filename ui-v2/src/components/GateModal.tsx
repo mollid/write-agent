@@ -16,8 +16,8 @@ function prettyArtifact(raw: string): string {
   }
 }
 
-/** R4: global approval modal. Setup gates carry a feedback box; the
- * force-pass gate requires an explicit second confirmation step. The X
+/** R4: global approval modal. Setup and arc_detail gates carry a feedback box;
+ * the force-pass gate requires an explicit second confirmation step. The X
  * button only DISMISSES the modal — the job keeps waiting server-side and
  * the JobStrip offers「打开审批」to bring it back. */
 export default function GateModal({ project }: { project: string }) {
@@ -48,6 +48,8 @@ export default function GateModal({ project }: { project: string }) {
       gate.label.startsWith("rewrite:"))
     return null;
   const isSetup = gate.label.startsWith("setup:");
+  const isArcDetail = gate.label === "arc_detail";
+  const isArcCast = gate.label === "arc_cast";
   const isForce = gate.label === "chapter_review_failed";
   const title = isSetup
     ? `设定阶段：${SETUP_STAGE_NAMES[gate.label.slice(6)] ?? gate.label.slice(6)} — 通过还是修改？`
@@ -96,7 +98,7 @@ export default function GateModal({ project }: { project: string }) {
       ) : (
         <Typography.Text type="secondary">（产物内容不可用——重连恢复的审批）</Typography.Text>
       )}
-      {isSetup && (
+      {(isSetup || isArcDetail || isArcCast) && (
         <>
           {feedbackHistory.length > 0 && (
             <List
@@ -113,7 +115,13 @@ export default function GateModal({ project }: { project: string }) {
             rows={3}
             value={feedback}
             onChange={(e) => setFeedback(e.target.value)}
-            placeholder="修改意见（自然语言），系统会带着意见重新生成该阶段…"
+            placeholder={
+              isArcDetail
+                ? "修改意见（如「本卷太短，按骨架章数细化」），系统会带着意见重新细化该卷；留空拒绝则骨架回到队列…"
+                : isArcCast
+                  ? "修改意见（如「反派动机与地窟旧怨挂钩」），系统会带着意见重新拟阵容；留空拒绝 = 本卷不新增…"
+                  : "修改意见（自然语言），系统会带着意见重新生成该阶段…"
+            }
           />
         </>
       )}
@@ -134,7 +142,15 @@ export default function GateModal({ project }: { project: string }) {
           danger={isForce && confirmForce}
           onClick={() => submit(false, feedback)}
         >
-          {isSetup ? "带反馈重生成" : isForce ? "跳过本章（本章将不保存）" : "拒绝"}
+          {isSetup
+            ? "带反馈重生成"
+            : isArcDetail
+              ? "带反馈重细化"
+              : isArcCast
+                ? "带反馈重拟"
+                : isForce
+                  ? "跳过本章（本章将不保存）"
+                  : "拒绝"}
         </Button>
       </Space>
     </Modal>

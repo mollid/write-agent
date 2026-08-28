@@ -9,11 +9,14 @@ from rich.table import Table
 from novel.config import load_config
 from novel.project import NovelProject
 from novel.runtime import is_live_mode, make_provider
+from novel.skills import load_skills
 from novel.store.bible import StoryBible
 from novel.store.vector import VectorMemory, hash_embed
 
 app = typer.Typer(add_completion=False)
 console = Console()
+skill_app = typer.Typer(help="第三方技能：安装/查看/启停（指令包，注入到目标智能体的调用）")
+app.add_typer(skill_app, name="skill")
 
 
 def _load_project(project: Path | None) -> NovelProject:
@@ -51,7 +54,7 @@ def premise(text: str, project: Path | None = _project_opt) -> None:
     """Run Strategist on a premise (demo mode uses canned data)."""
     proj = _load_project(project)
     cfg = load_config(proj.config_path)
-    provider = make_provider(cfg)
+    provider = make_provider(cfg, skills=load_skills(proj.root))
     from novel.agents.strategist import StrategistAgent
     concept = StrategistAgent(provider, cfg.model_for("strategist")).run(text)
     StoryBible(proj).set_concept(concept)
@@ -65,7 +68,7 @@ def setup(premise_text: str = typer.Option("", "--premise", "-m",
     """Guided setup (标准模式): approve or refine each stage with natural-language feedback."""
     proj = _load_project(project)
     cfg = load_config(proj.config_path)
-    provider = make_provider(cfg)
+    provider = make_provider(cfg, skills=load_skills(proj.root))
     bible = StoryBible(proj)
     from novel.render import artifact_text
     from novel.runtime import AGENT_NAMES
@@ -86,7 +89,8 @@ def setup(premise_text: str = typer.Option("", "--premise", "-m",
             if regenerate:  # invalid input / empty feedback never re-runs the agent
                 console.rule(f"[bold cyan]{stage}[/bold cyan]（第 {len(feedback) + 1} 次生成）")
                 artifact = generate_stage(stage, provider=provider, cfg_map=cfg_map,
-                                          bible=bible, premise=premise_text, feedback=feedback)
+                                          bible=bible, premise=premise_text, feedback=feedback,
+                                          target_chapters=cfg.generation.target_chapters)
                 console.print(artifact_text(artifact)[:2000])
                 regenerate = False
             choice = typer.prompt("通过(a) / 反馈(f) / 退出(q)", default="a")
@@ -115,7 +119,7 @@ def write_chapter(n: int = typer.Argument(1, help="number of chapters to write")
     """Write the next N chapters end-to-end (demo or live)."""
     proj = _load_project(project)
     cfg = load_config(proj.config_path)
-    provider = make_provider(cfg)
+    provider = make_provider(cfg, skills=load_skills(proj.root))
     bible = StoryBible(proj)
     vector = VectorMemory(proj, embed=hash_embed)
     from novel.graph import run_full_pipeline
@@ -162,6 +166,56 @@ def export(fmt: str = "md", project: Path | None = _project_opt) -> None:
     proj = _load_project(project)
     out = export_markdown(proj)
     console.print(f"[green]Exported[/green] {out}")
+
+
+@skill_app.command("install")
+def skill_install(src: Path, project: Path | None = _project_opt,
+                  target: str = typer.Option(
+                      "", "--target",
+                      help="目标智能体（逗号分隔；仅 SKILL.md/ZIP 技能需要，默认 writer,editor）"),
+                  force: bool = typer.Option(False, "--force", help="覆盖同名技能")) -> None:
+    """Install a skill package: native dir (skill.json), Claude SKILL.md dir/file, or .zip."""
+    from novel.skills import install_skill
+    proj = _load_project(project)
+    targets = [t.strip() for t in target.split(",") if t.strip()] or None
+    try:
+        dest = install_skill(src, proj.root, targets=targets, force=force)
+    except (ValueError, FileNotFoundError) as e:
+        console.print(f"[red]安装失败：{e}[/red]")
+        raise typer.Exit(code=1) from e
+    console.print(f"[green]已安装[/green] {dest}")
+
+
+@skill_app.command("list")
+def skill_list(project: Path | None = _project_opt) -> None:
+    """List installed skills and their targeted agents."""
+    from novel.skills import load_skills
+    proj = _load_project(project)
+    skills = load_skills(proj.root)
+    if not skills:
+        console.print("[yellow]尚未安装技能（skills/ 目录为空或不存在）[/yellow]")
+        return
+    t = Table("技能", "targets", "状态", "描述")
+    for s in skills:
+        t.add_row(s.name, ", ".join(sorted(s.targets)),
+                  "启用" if s.enabled else "停用", s.description)
+    console.print(t)
+
+
+@skill_app.command("enable")
+def skill_enable(name: str, project: Path | None = _project_opt) -> None:
+    """Enable an installed skill."""
+    from novel.skills import set_skill_enabled
+    set_skill_enabled(_load_project(project).root, name, True)
+    console.print(f"[green]已启用[/green] {name}")
+
+
+@skill_app.command("disable")
+def skill_disable(name: str, project: Path | None = _project_opt) -> None:
+    """Disable an installed skill (kept on disk, no longer injected)."""
+    from novel.skills import set_skill_enabled
+    set_skill_enabled(_load_project(project).root, name, False)
+    console.print(f"[yellow]已停用[/yellow] {name}")
 
 
 def main() -> None:

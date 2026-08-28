@@ -95,6 +95,28 @@ def test_setup_command_invalid_choice_does_not_regenerate(tmp_path):
     assert "设定完成" in result.output
 
 
+def test_setup_passes_longform_params(tmp_path, monkeypatch):
+    """Guided setup wires cfg.generation.target_chapters into the outline stage."""
+    from novel import setup_flow
+    from novel.project import NovelProject
+
+    proj = NovelProject.scaffold("n", "fantasy", root=tmp_path)
+    raw = proj.config_path.read_text(encoding="utf-8")
+    proj.config_path.write_text(raw + "generation:\n  target_chapters: 240\n", encoding="utf-8")
+    captured: list[dict] = []
+    real = setup_flow.generate_stage
+
+    def spy(stage, **kw):
+        captured.append(kw)
+        return real(stage, **kw)
+
+    monkeypatch.setattr(setup_flow, "generate_stage", spy)
+    result = runner.invoke(app, ["--project", str(proj.root), "setup", "--premise", "a thief"],
+                           input="a\na\na\na\n")
+    assert result.exit_code == 0, result.output
+    assert captured and captured[-1].get("target_chapters") == 240
+
+
 def test_write_chapter_rewrites_empty_chapter(tmp_path):
     proj = _demo_project(tmp_path)
     runner.invoke(app, ["--project", str(proj), "write-chapter", "2"])
@@ -128,3 +150,60 @@ def test_write_chapter_passes_longform_params(tmp_path, monkeypatch):
     assert captured["planned_total"] == 240
     assert captured["arc_lookahead"] == 8
     assert captured["gate_every_n"] == 1
+
+
+def test_skill_commands_install_list_toggle(tmp_path):
+    """skill install → list shows it → disable → list reflects it."""
+    import json
+    src = tmp_path / "pkg" / "my-style"
+    (src).mkdir(parents=True)
+    (src / "skill.json").write_text(json.dumps(
+        {"name": "my-style", "description": "测试技能", "targets": ["writer"]},
+        ensure_ascii=False), encoding="utf-8")
+    (src / "writer.md").write_text("多用短句。", encoding="utf-8")
+
+    proj = tmp_path / "sk"
+    runner.invoke(app, ["init", "sk", "--root", str(tmp_path)])
+    r = runner.invoke(app, ["--project", str(proj), "skill", "install", str(src)])
+    assert r.exit_code == 0, r.output
+    assert (proj / "skills" / "my-style" / "skill.json").is_file()
+
+    r = runner.invoke(app, ["--project", str(proj), "skill", "list"])
+    assert r.exit_code == 0, r.output
+    assert "my-style" in r.output and "writer" in r.output
+
+    r = runner.invoke(app, ["--project", str(proj), "skill", "disable", "my-style"])
+    assert r.exit_code == 0, r.output
+    manifest = json.loads((proj / "skills" / "my-style" / "skill.json").read_text())
+    assert manifest["enabled"] is False
+
+
+def test_skill_install_rejects_unknown_target(tmp_path):
+    import json
+    src = tmp_path / "pkg2" / "bad"
+    (src).mkdir(parents=True)
+    (src / "skill.json").write_text(json.dumps(
+        {"name": "bad", "targets": ["dragon"]}), encoding="utf-8")
+    (src / "dragon.md").write_text("x", encoding="utf-8")
+    proj = tmp_path / "sk2"
+    runner.invoke(app, ["init", "sk2", "--root", str(tmp_path)])
+    r = runner.invoke(app, ["--project", str(proj), "skill", "install", str(src)])
+    assert r.exit_code != 0 or "未知 target" in r.output
+
+
+def test_skill_install_claude_md_one_step(tmp_path):
+    """A Claude Agent Skills package installs without any rewriting."""
+    pkg = tmp_path / "hw" / "human-writing"
+    pkg.mkdir(parents=True)
+    (pkg / "SKILL.md").write_text(
+        "---\nname: human-writing\ndescription: less AI-sounding prose\n---\n"
+        "Prefer concrete verbs over adverb stacks.", encoding="utf-8")
+    proj = tmp_path / "cz"
+    runner.invoke(app, ["init", "cz", "--root", str(tmp_path)])
+    r = runner.invoke(app, ["--project", str(proj), "skill", "install", str(pkg),
+                            "--target", "writer,editor"])
+    assert r.exit_code == 0, r.output
+    import json
+    manifest = json.loads((proj / "skills" / "human-writing" / "skill.json").read_text())
+    assert manifest["targets"] == ["writer", "editor"]
+    assert (proj / "skills" / "human-writing" / "writer.md").is_file()

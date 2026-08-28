@@ -94,6 +94,10 @@ export const useEvents = create<EventState>((set) => ({
       switch (ev.type) {
         case "stage":
           patch.lastStage = String(ev.stage);
+          // a new volume's cast/detail starts a fresh feedback round history
+          // (the arc_cast / arc_detail gates show "本阶段已提交的反馈")
+          if (ev.stage === "arc_cast" || ev.stage === "arc_detail")
+            patch.feedbackHistory = [];
           break;
         case "chapter_start":
           patch.lastChapterStart = {

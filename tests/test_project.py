@@ -16,6 +16,16 @@ def test_scaffold_writes_self_ignoring_gitignore(tmp_path):
     assert gi.exists()
     assert gi.read_text(encoding="utf-8").strip() == "*"
 
+def test_scaffold_target_chapters_written_into_config(tmp_path):
+    plain = NovelProject.scaffold("a", genre="g", root=tmp_path / "a")
+    assert "target_chapters" not in (plain.root / "project.config.yaml").read_text(encoding="utf-8")
+    longform = NovelProject.scaffold("b", genre="g", root=tmp_path / "b", target_chapters=660)
+    cfg = (longform.root / "project.config.yaml").read_text(encoding="utf-8")
+    assert "target_chapters: 660" in cfg
+    from novel.config import load_config
+    assert load_config(longform.config_path).generation.target_chapters == 660
+
+
 def test_save_and_load_canonical_round_trip(tmp_path):
     proj = NovelProject.scaffold("n", genre="g", root=tmp_path)
     proj.save_canonical({"concept": {"genre": "fantasy"}})

@@ -66,6 +66,12 @@ export function describe(ev: SseEvent): string | null {
         : `⚠ ${s("warning")}`;
     case "arc_detailed":
       return `📖 卷「${s("arc")}」明细已生成（${s("chapters")} 章）`;
+    case "arc_cast_done":
+      return `🎭 卷「${s("arc")}」新增角色：${s("names")}`;
+    case "arc_cast_denied":
+      return `卷「${s("arc")}」新角色建议被拒绝——本卷不新增角色`;
+    case "arc_detail_denied":
+      return `卷「${s("arc")}」明细被拒绝——骨架已回到队列，本次运行不再细化该卷`;
     case "arc_summary_done":
       return `📘 卷「${s("arc")}」摘要与全书梗概已更新`;
     case "job_end":

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from novel.memory.extractor import ChapterUpdates
@@ -81,9 +82,23 @@ class StoryBible:
             )
 
     # ---- concept / world / outline ----
+    def _backup_section(self, section: str, old: object) -> None:
+        """Snapshot a bible section before it gets overwritten (settings have no
+        undo; chapters get .meta/chapter_versions, sections get this). `old` is
+        the plain JSON payload from the canonical store."""
+        versions = self.proj.root / ".meta" / "bible_versions"
+        versions.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        (versions / f"{section}-{ts}.json").write_text(
+            json.dumps(old, ensure_ascii=False, indent=2), encoding="utf-8")
+
     def set_concept(self, c: Concept) -> None:
         d = self._load()
-        d["concept"] = c.model_dump()
+        old = d.get("concept")
+        new = c.model_dump()
+        if old is not None and old != new:
+            self._backup_section("concept", old)
+        d["concept"] = new
         self._save(d)
 
     def get_concept(self) -> Concept | None:
@@ -92,7 +107,11 @@ class StoryBible:
 
     def set_world(self, w: World) -> None:
         d = self._load()
-        d["world"] = w.model_dump()
+        old = d.get("world")
+        new = w.model_dump()
+        if old is not None and old != new:
+            self._backup_section("world", old)
+        d["world"] = new
         self._save(d)
 
     def get_world(self) -> World | None:
@@ -101,7 +120,11 @@ class StoryBible:
 
     def set_outline(self, o: Outline) -> None:
         d = self._load()
-        d["outline"] = o.model_dump()
+        old = d.get("outline")
+        new = o.model_dump()
+        if old is not None and old != new:
+            self._backup_section("outline", old)
+        d["outline"] = new
         self._save(d)
 
     def get_outline(self) -> Outline | None:
@@ -112,12 +135,26 @@ class StoryBible:
     def upsert_character(self, ch: Character) -> None:
         d = self._load()
         chars = d.setdefault("characters", [])
+        new = ch.model_dump()
         for i, existing in enumerate(chars):
             if existing["id"] == ch.id:
-                chars[i] = ch.model_dump()
+                if existing != new:
+                    self._backup_section(f"character-{ch.id}", existing)
+                chars[i] = new
                 break
         else:
-            chars.append(ch.model_dump())
+            chars.append(new)
+        self._save(d)
+
+    def set_characters(self, roster: list[Character]) -> None:
+        """Full-roster replacement (manual JSON PUT): snapshot the whole previous
+        roster first — single upserts snapshot only the one card they replace."""
+        d = self._load()
+        old = d.get("characters") or []
+        new = [c.model_dump() for c in roster]
+        if old and old != new:
+            self._backup_section("characters", old)
+        d["characters"] = new
         self._save(d)
 
     def get_character(self, cid: str) -> Character | None:

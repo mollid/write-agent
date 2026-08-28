@@ -86,6 +86,7 @@ def _provider(concept: Concept, chars: list[Character]) -> _SeqArcProvider:
         "strategist": concept, "worldbuilder": World(setting="city"), "character": chars,
         "outliner": skeleton_outline, "arc_planner": plan,
         "writer": "Chapter prose text.", "continuity": "[]",
+        "cast_planner": [],
         "editor": "x", "scorer": passing,
         "extractor": {"character_states": {}, "voice_samples": {"c1": "drawl"},
                       "mannerisms_used": {"c1": ["taps table"]}, "key_events": [],

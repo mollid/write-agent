@@ -21,7 +21,10 @@ function renderModal() {
 }
 
 function stubFetch() {
-  const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+  const fetchMock = vi.fn(
+    async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response("{}", { status: 200 }),
+  );
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
@@ -248,4 +251,54 @@ test("artifacts longer than 4000 chars render in full — no mid-JSON cutoff", (
   expect(text).toContain(filler);
   // the tail survives too: pretty JSON ends with the closing brace
   expect(text.trimEnd().endsWith("}")).toBe(true);
+});
+
+test("arc_detail gate: feedback box + 带反馈重细化 posts the feedback", async () => {
+  const fetchMock = stubFetch();
+  renderModal();
+  act(() => {
+    useEvents.getState().apply({
+      type: "gate", gate_id: "g9", label: "arc_detail",
+      artifact: '{"arc_name": "卷二", "chapters": []}', job_id: "j1",
+    });
+  });
+  expect(screen.getByTestId("gate-feedback")).toBeInTheDocument();
+  expect(screen.getByTestId("gate-reject")).toHaveTextContent("带反馈重细化");
+  fireEvent.change(screen.getByTestId("gate-feedback"), { target: { value: "太短，扩到80章" } });
+  fireEvent.click(screen.getByTestId("gate-reject"));
+  await waitFor(() => {
+    const call = fetchMock.mock.calls.find(
+      (c) => String(c[0]) === "/api/gates/g9",
+    ) as unknown as [string, RequestInit] | undefined;
+    expect(call).toBeTruthy();
+    expect(JSON.parse(String(call![1]?.body))).toEqual({
+      approve: false,
+      feedback: "太短，扩到80章",
+    });
+  });
+});
+
+test("arc_cast gate: feedback box + 带反馈重拟 posts the feedback", async () => {
+  const fetchMock = stubFetch();
+  renderModal();
+  act(() => {
+    useEvents.getState().apply({
+      type: "gate", gate_id: "g10", label: "arc_cast",
+      artifact: '[{"id": "ant-mara"}]', job_id: "j1",
+    });
+  });
+  expect(screen.getByTestId("gate-feedback")).toBeInTheDocument();
+  expect(screen.getByTestId("gate-reject")).toHaveTextContent("带反馈重拟");
+  fireEvent.change(screen.getByTestId("gate-feedback"), { target: { value: "反派动机更立体" } });
+  fireEvent.click(screen.getByTestId("gate-reject"));
+  await waitFor(() => {
+    const call = fetchMock.mock.calls.find(
+      (c) => String(c[0]) === "/api/gates/g10",
+    ) as unknown as [string, RequestInit] | undefined;
+    expect(call).toBeTruthy();
+    expect(JSON.parse(String(call![1]?.body))).toEqual({
+      approve: false,
+      feedback: "反派动机更立体",
+    });
+  });
 });

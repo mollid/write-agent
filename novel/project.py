@@ -17,7 +17,20 @@ generation:
   human_gate_every_n_chapters: 1
   context_token_budget: 24000
 language: en
+# 接口需要代理/VPN 才能访问时取消注释（仅真实模式生效，模型调用与 TTS 都会走它）
+# network:
+#   proxy: http://127.0.0.1:7890
+#   no_proxy: localhost,127.0.0.1
 """
+
+
+def _config_text(target_chapters: int | None) -> str:
+    """Default project.config.yaml; longform projects carry their whole-book plan."""
+    if target_chapters is None:
+        return _DEFAULT_CONFIG
+    return _DEFAULT_CONFIG.replace(
+        "  context_token_budget: 24000\n",
+        f"  context_token_budget: 24000\n  target_chapters: {target_chapters}\n")
 
 
 @dataclass
@@ -33,7 +46,8 @@ class NovelProject:
         return self.root / "project.config.yaml"
 
     @classmethod
-    def scaffold(cls, name: str, genre: str, root: Path | None = None) -> NovelProject:
+    def scaffold(cls, name: str, genre: str, root: Path | None = None,
+                 target_chapters: int | None = None) -> NovelProject:
         base = root or Path.cwd()
         proj_root = base / name
         (proj_root / "bible").mkdir(parents=True, exist_ok=True)
@@ -41,7 +55,8 @@ class NovelProject:
         (proj_root / "memory" / "chroma").mkdir(parents=True, exist_ok=True)
         (proj_root / "runs").mkdir(parents=True, exist_ok=True)
         (proj_root / ".meta" / "reviews").mkdir(parents=True, exist_ok=True)
-        (proj_root / "project.config.yaml").write_text(_DEFAULT_CONFIG, encoding="utf-8")
+        (proj_root / "project.config.yaml").write_text(_config_text(target_chapters),
+                                                       encoding="utf-8")
         (proj_root / ".gitignore").write_text("*\n", encoding="utf-8")
         (proj_root / "bible" / "foreshadowing.json").write_text("[]", encoding="utf-8")
         (proj_root / "bible" / "events.jsonl").write_text("", encoding="utf-8")

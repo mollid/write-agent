@@ -15,6 +15,12 @@ class ModelConfig:
     timeout: float | None = None     # per-call timeout in seconds; None = litellm default (use for slow local models)
 
 
+@dataclass(frozen=True)
+class NetworkConfig:
+    proxy: str | None = None      # e.g. http://127.0.0.1:7890 — routes live-mode model/TTS calls
+    no_proxy: str | None = None   # comma-separated hosts/CIDRs that bypass the proxy
+
+
 @dataclass
 class Thresholds:
     score_min: int = 80
@@ -37,6 +43,7 @@ class ProjectConfig:
     thresholds: Thresholds = field(default_factory=Thresholds)
     generation: Generation = field(default_factory=Generation)
     language: str = "en"
+    network: NetworkConfig = field(default_factory=NetworkConfig)
 
     def model_for(self, agent_name: str) -> ModelConfig:
         if agent_name in self.models:
@@ -61,6 +68,7 @@ def load_config(path: Path) -> ProjectConfig:
     }
     th = raw.get("thresholds") or {}
     gen = raw.get("generation") or {}
+    net = raw.get("network") or {}
     return ProjectConfig(
         models=models,
         thresholds=Thresholds(score_min=th.get("score_min", 80), max_retries=th.get("max_retries", 3)),
@@ -73,4 +81,5 @@ def load_config(path: Path) -> ProjectConfig:
             arc_detail_lookahead=gen.get("arc_detail_lookahead", 5),
         ),
         language=str(raw.get("language", "en")).strip().lower() or "en",
+        network=NetworkConfig(proxy=net.get("proxy"), no_proxy=net.get("no_proxy")),
     )

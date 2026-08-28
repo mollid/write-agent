@@ -17,6 +17,52 @@ def is_live_mode() -> bool:
     return os.environ.get("NOVEL_LIVE") == "1"
 
 
+_PROXY_ENV_VARS = ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
+                   "ALL_PROXY", "all_proxy")
+_NO_PROXY_ENV_VARS = ("NO_PROXY", "no_proxy")
+
+# Pre-tool values of the proxy env vars we have written, so switching to a
+# project without `network:` config restores the user's own environment instead
+# of leaking the previous project's proxy into later runs.
+_proxy_env_backup: dict[str, str | None] = {}
+_applied_proxy_vars: set[str] = set()
+
+
+def _apply_network_proxy(cfg: ProjectConfig) -> None:
+    """Export the project's proxy settings before the first httpx client exists.
+
+    litellm's OpenAI-compatible path rides on httpx with ``trust_env=True``,
+    which reads HTTP(S)_PROXY / ALL_PROXY / NO_PROXY when the client is built.
+    `make_provider` runs before any completion call, so setting them here routes
+    every live-mode model call through the configured proxy. Vars this config
+    does not name are restored to their pre-tool values (a project without
+    `network:` leaves the user's shell environment untouched).
+
+    Caveat: the environment is process-global — concurrent live jobs on projects
+    with *different* proxy configs can race (last `make_provider` wins).
+    """
+    global _applied_proxy_vars
+    targets: dict[str, str] = {}
+    if cfg.network.proxy:
+        for var in _PROXY_ENV_VARS:
+            targets[var] = cfg.network.proxy
+    if cfg.network.no_proxy:
+        for var in _NO_PROXY_ENV_VARS:
+            targets[var] = cfg.network.no_proxy
+    for var in _applied_proxy_vars | targets.keys():
+        if var not in _proxy_env_backup:
+            _proxy_env_backup[var] = os.environ.get(var)
+    for var in _applied_proxy_vars - targets.keys():
+        original = _proxy_env_backup[var]
+        if original is None:
+            os.environ.pop(var, None)
+        else:
+            os.environ[var] = original
+    for var, value in targets.items():
+        os.environ[var] = value
+    _applied_proxy_vars = set(targets)
+
+
 class _DemoSeqProvider(FakeProvider):
     """FakeProvider serving queued arc_detailer responses so each volume in
     demo mode gets its own correctly-sized detail (spec §4.3)."""
@@ -32,11 +78,19 @@ class _DemoSeqProvider(FakeProvider):
         return super()._lookup(messages)
 
 
-def make_provider(cfg: ProjectConfig) -> ModelProvider:
+def make_provider(cfg: ProjectConfig, skills: list | None = None) -> ModelProvider:
+    """Build the run's provider; with skills installed the provider injects each
+    active skill's directives into its targeted agents' calls."""
     if is_live_mode():
+        _apply_network_proxy(cfg)
         from novel.providers import LiteLLMProvider
-        return LiteLLMProvider(language=cfg.language)
-    return demo_provider()
+        provider: ModelProvider = LiteLLMProvider(language=cfg.language)
+    else:
+        provider = demo_provider()
+    if skills:
+        from novel.skills import SkillProvider
+        return SkillProvider(provider, skills)
+    return provider
 
 
 def demo_provider() -> ModelProvider:
@@ -74,6 +128,7 @@ def demo_provider() -> ModelProvider:
     return _DemoSeqProvider({
         "strategist": concept, "worldbuilder": World(setting="city of bells"),
         "character": chars, "outliner": outline,
+        "cast_planner": [],   # demo volumes reuse the initial cast
         "arc_planner": ArcPlan(arcs=[ArcSkeleton(arc_name="第一卷", chapter_start=1,
                                                   chapter_end=6, premise="demo"),
                                      ArcSkeleton(arc_name="第二卷", chapter_start=7,

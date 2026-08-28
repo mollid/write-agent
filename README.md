@@ -11,6 +11,7 @@
 
 - **中英文开关**：`project.config.yaml` 的 `language: zh|en` 在真实模型模式下让所有 9 个智能体统一用一种语言输出，无需每次创意里加提示词。
 - **混用多家模型**：每个智能体可各自指定 `api_base` + `api_key`，在同一项目里混用 deepseek、agnes.ai、哈基米API站、ollama 等任意 OpenAI 兼容端点。`project.config.yaml` 默认被 git 忽略，可安全存放 key。详见[配置真实模型](#配置真实模型)。
+- **代理 / VPN 支持**：接口需要翻墙时，配置 `network.proxy` 后模型调用与 TTS 合成统一走本地代理。详见[代理 / VPN 访问](#代理--vpn-访问)。
 
 ## 环境要求
 
@@ -94,10 +95,12 @@ cd ui-v2 && npm install && npm run build
 - **模式与 CLI 一致**：默认演示模式；在启动前设置 `NOVEL_LIVE=1` 即为真实模型模式（界面右上角有模式标识），模型配置同样读自各项目的 `project.config.yaml`。
 - **实时进度**：章节生成的各阶段（世界观、大纲、写作、评分、连续性检查等）通过 SSE 推送到浏览器，含进度条和事件日志。
 - **评分历史留档**：每次质量评分（含重写前后的各次尝试、维度得分与批评意见）追加写入项目内 `.meta/reviews/reviews.jsonl`，界面「评分历史」面板按章展开查看。
+- **设定版本历史**：概念/世界观/大纲被覆盖、角色卡被改写或整阵容被替换之前，旧版本自动快照到项目内 `.meta/bible_versions/`（文件名 `段名-时间戳.json`，如 `world-20260821T…json`、`character-prot-lorne-….json`）——与章节正文的 `.meta/chapter_versions/` 同一机制。章节写作过程中的角色状态推进不会产生快照。注意：快照在项目目录内，删除/重建项目目录仍会一并丢失。
 - **写作记忆**：审批反馈与评分弱项持久化到项目内 `.meta/writing_notes.jsonl`——分阶段设定中每次「带反馈重生成」的修改意见沉淀为长期风格指令，章节评审中低于 `thresholds.score_min` 的维度批评沉淀为弱项提醒；后续每一章的写作上下文都会注入最近 12 条风格指令、最近 5 章的弱项聚合以及上一章结尾原文（约 600 字，用于文风与情节衔接），预算不足时按优先级让位。
-- **审批门控**：真实模式下大纲与章节阶段的人工审核会以卡片形式弹出，点击「批准/拒绝」即可，无需命令行交互。
+- **审批门控**：真实模式下大纲与章节阶段的人工审核会以卡片形式弹出，点击「批准/拒绝」即可，无需命令行交互。长篇模式有两道卷级门：`arc_cast` 审**本卷新登场角色建议**（可「通过」采用、「带反馈重拟」（≤3 轮）或留空拒绝=本卷不新增；无建议时自动跳过）；`arc_detail` 审**已细化完成的卷**（章 + 节拍）：可「通过」入库、「带反馈重细化」（修改意见带进明细生成器，每卷最多 3 轮）或留空拒绝（骨架回到队列，本次运行不再细化该卷）。
 - **任务管理**：每个项目同一时间只能有一个任务在运行，可随时取消；取消在章节边界生效。
 - **分阶段设定（标准模式）**：点击「分阶段设定」，四个设定阶段（概念/世界观/人物/大纲）逐个生成并弹出审批卡片，卡片内可填写自然语言修改意见让系统重新生成，或直接通过；已通过的阶段在重跑时自动跳过。
+- **长篇模式（两段式大纲）**：新建项目表单可填写「计划全书章数」（如 660），「生成章节」页的「长篇设置」可随时查看或修改——写入 `generation.target_chapters`。设置后所有出纲路径先生成全书卷骨架、只细化第一卷，写作中已明细章节不足 `arc_detail_lookahead` 时自动细化下一卷；请在生成大纲**之前**设置。**逐卷阵容规划**：每卷细化前，阵容规划器（`cast_planner`，沿用 `models.character` 槽位）会提议本卷 0–5 名新登场角色（自动过滤"新主角"与重名 id），live 模式经 `arc_cast` 人工门批准后入库，再交给该卷细化器编排——长篇的角色阵容会随卷生长；第一卷的初始阵容来自设定阶段。
 - **设定库**：「创作 → 设定库」页面（`/p/{项目名}/bible`）集中查看与修改全部故事设定，支持六段预览、手动 JSON 编辑、对话改写与大纲追章，详见下文[设定库](#设定库)小节。
 - **章节改写**：「阅读」页正文下方可对已生成的章节发起改写，两种模式：**微调**（保持结构做定点修改，如"结尾对白更克制"）与**创意重编排**（允许重组场景、调整节奏，但受上一章结尾、伏笔与风格指令约束）。改写稿以文本 diff 提案展示，可应用（旧稿自动备份到 `.meta/chapter_versions/`，正文与向量记忆原子更新）、带反馈再改（最多 3 轮）或放弃；若本章之后已有后续章节会提示衔接风险。正文卡片上的「编辑」按钮还支持**手动直接改写**——保存走同一套备份与原子更新流程（过短内容会被拒绝，任务运行中不可编辑）。
 - **人物关系图谱**：「创作 → 关系图谱」页面以径向图谱展示人物关系——节点为人物（大小按关系数量，颜色按角色类型：主角/反派/配角），边为关系描述（设定阶段的静态关系 + 随章节演化的最新关系，共同关键事件次数决定边的粗细），悬停边可看完整描述，点击节点在侧栏查看人物卡（动机、人物弧、当前状态、关系清单）。数据实时来自设定库，无需单独维护。
@@ -131,7 +134,7 @@ cd ui-v2 && npm install && npm run build
 
 #### 大纲追章
 
-大纲章节不够写时（`write-chapter` 会警告 `outline exhausted`），在设定库「大纲」段使用「大纲追章」：输入要追加的章节数（1–50），系统生成追章建议并以 diff 展示，批准后并入大纲；之后再次运行 `write-chapter`（或界面「生成章节」）即可继续写新追加的章节，`outline exhausted` 警告随之消除。演示模式下会确定性地追加占位章节，流程同样可以走通。设置了 `target_chapters` 时，写作循环会在已明细章节不足时**自动**生成下一卷明细（live 模式会经过 `arc_detail` 人工门），UI 手动追章仍可用，两种方式共存。
+大纲章节不够写时（`write-chapter` 会警告 `outline exhausted`），在设定库「大纲」段使用「大纲追章」：输入要追加的章节数（1–50），系统生成追章建议并以 diff 展示，批准后并入大纲（追章草稿的章号一律防御性重编号续接现有大纲，模型输出的编号仅供参考）；之后再次运行 `write-chapter`（或界面「生成章节」）即可继续写新追加的章节，`outline exhausted` 警告随之消除。演示模式下会确定性地追加占位章节，流程同样可以走通。设置了 `target_chapters` 时，写作循环会在已明细章节不足时**自动**生成下一卷明细——live 模式下明细产物经过 `arc_detail` 人工门（通过 / 带反馈重细化 ≤3 轮 / 拒绝回队列），UI 手动追章仍可用，两种方式共存。
 
 ## 快速开始：演示模式
 
@@ -352,9 +355,11 @@ generation:
 | `generation.context_token_budget` | 每章工作记忆的上下文 Token 预算，默认 `24000`。 |
 | `generation.min_chapter_chars` | 断点续跑时判定章节「已完成」的最小字符数，默认 `50`（必须低于演示模式章节长度 62）。真实模型项目建议设为实际章节长度的下限（如 `2000`）；设得过大会导致同一章每次续跑都被重写。 |
 | `generation.human_gate_every_n_chapters` | 人工审核频率配置；当前实现会在真实模式的大纲与每章阶段请求批准。 |
-| `generation.target_chapters` | 计划全书总章数；设置后写作流程（write-chapter / 界面「生成章节」的内部 setup）走两段式大纲（卷骨架 + 按卷明细）；留空保持单次全量出纲。引导式 `setup` 命令当前仍为单次出纲 | `None`（留空） |
+| `generation.target_chapters` | 计划全书总章数；设置后**所有出纲路径**（write-chapter / 界面「生成章节」的内部 setup / 引导式 `setup` 与界面引导设定的大纲阶段）都走两段式大纲（卷骨架 + 按卷明细）；留空保持单次全量出纲。可在 GUI 新建项目时填写，或随时在「生成章节」页的「长篇设置」里修改（对应 `GET/PUT /api/projects/{name}/config`，该接口不读写模型密钥）。设置后引导式大纲阶段的反馈会喂给卷骨架规划器。所有入库大纲都会做硬校验：章号必须连续、骨架队列不得与已细化卷重名，违规产物自动带错误重试一次，批准时兜底拒绝 | `None`（留空） |
 | `generation.chapter_target_length` | 每章目标长度（zh=字 / en=词），注入写手提示词 | `2500` |
 | `generation.arc_detail_lookahead` | 自动续纲提前量：已明细章节不足该值时自动生成下一卷明细（强剧情可调大） | `5` |
+| `network.proxy` | （可选）HTTP(S) 代理地址（如 `http://127.0.0.1:7890`，VPN/Clash/v2rayN 的本地混合端口）。真实模式下**所有模型调用与 TTS 语音合成**都会走该代理；demo 模式忽略。详见[代理 / VPN 访问](#代理--vpn-访问)。 |
+| `network.no_proxy` | （可选）逗号分隔的直连域名 / IP / CIDR，绕过 `network.proxy`（如 `localhost,127.0.0.1,.deepseek.com`）。 |
 | `language` | 输出语言开关，`en`（默认）或 `zh`。真实模式下所有智能体按此语言生成自然语言文本。 |
 
 #### 混用多家 OpenAI 兼容模型
@@ -412,6 +417,24 @@ language: zh
 - **可混本地与云**：例如 `writer` 用本地 14B 模型跑创作、`scorer` 用 deepseek 云做评分；`timeout` 按 agent 各自配置。
 - **离线环境**：无网时 litellm 启动期会尝试拉取模型价目表并失败回退为本地副本，仅打印一条警告，不影响调用。
 - 也支持 Ollama 原生协议（`provider: ollama, model: <tag>`），但需额外给 litellm 配置 ollama base，不如走 OpenAI 兼容接口统一简便，本节推荐后者。
+
+#### 代理 / VPN 访问
+
+接口在国外 / 需要 VPN 才能访问时（OpenAI 官方、Gemini、edge-tts 微软语音等），在 `project.config.yaml` 里配置本地代理端口即可，真实模式下**模型调用和 TTS 语音合成都会走它**：
+
+```yaml
+network:
+  proxy: http://127.0.0.1:7890     # Clash / v2rayN 等的本地混合端口（HTTP 代理）
+  no_proxy: localhost,127.0.0.1    # 可选：需要直连的域名/IP/CIDR（国内中转站、本地 Ollama 等）
+```
+
+要点：
+
+- **仅真实模式生效**：demo 模式不联网，忽略该配置；CLI 与 `novel-ui` 界面都支持。
+- **实现方式是导出 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` 环境变量**（httpx 的标准机制），因此是进程级全局设置，不支持按 agent 配不同代理；同一进程里先后运行多个项目时按各自配置自动切换，无 `network:` 段的项目不受影响。
+- **本地 Ollama / 国内中转站记得加进 `no_proxy`**，否则本可直连的流量也被绕去代理。
+- 只支持 `http://` 代理（VPN 客户端的混合端口即 HTTP 代理，覆盖常见场景）；`socks5://` 需要 `uv add "httpx[socks]"` 安装 `socksio` 后才能用。
+- TTS（edge-tts 的微软接口）走代理时会显式传入 `proxy` 参数，与模型调用行为一致。
 
 ### 3. 在真实模型模式下运行
 
@@ -480,6 +503,49 @@ uv run novel write-chapter 2 --project ./my-novel
 NOVEL_LIVE=1 uv run novel premise "一句故事创意" --project ./my-novel
 NOVEL_LIVE=1 uv run novel write-chapter 2 --project ./my-novel
 ```
+
+## 第三方技能（skills）
+
+技能是**可安装的指令包**（纯提示词，不含可执行代码）：安装后，技能的指令会以系统消息注入到它所声明的智能体调用里——写作（writer）、评分（scorer）、设定构建（strategist/worldbuilder/character/outliner 等全部智能体标签均可作为目标）。CLI 与图形界面的所有入口（premise / setup / write-chapter / 对话改写 / 追章 / 长篇逐卷细化）统一生效。
+
+技能包是一个目录：
+
+```
+my-style/
+  skill.json   # {"name": "my-style", "description": "…",
+               #  "targets": ["writer", "scorer"], "enabled": true}
+  writer.md    # 每个目标标签一个指令文件：注入到 writer 的指令
+  scorer.md    # 注入到 scorer 的指令
+```
+
+可用目标标签：`strategist / worldbuilder / character / outliner / arc_planner / arc_detailer / cast_planner / writer / scorer / continuity / editor / extractor / summarizer / digestor / rewriter / setting_editor`。清单里声明的每个 target 必须有同名 `.md` 文件，否则安装被拒绝。
+
+```bash
+# 安装（拷贝进项目的 skills/ 目录；名字冲突或清单非法会报错）
+uv run novel skill install ./my-style --project ./my-novel
+
+# 一步安装 Claude Agent Skills 生态的技能（SKILL.md 目录/文件，或市场发的 .zip）
+#   SKILL.md 没有 targets 概念，用 --target 指定注入目标（默认 writer,editor）
+uv run novel skill install ./human-writing --target writer,editor --project ./my-novel
+uv run novel skill install ~/Downloads/human-writing.zip --target writer --project ./my-novel
+#   已装同名技能想换目标：加 --force 覆盖安装
+
+# 查看已安装技能与目标
+uv run novel skill list --project ./my-novel
+
+# 停用 / 启用（保留在磁盘上，停用后不再注入）
+uv run novel skill disable my-style --project ./my-novel
+uv run novel skill enable my-style --project ./my-novel
+```
+
+说明：
+
+- **兼容 Claude Agent Skills（SKILL.md）**：`skill install` 直接接受 SKILL.md 格式的目录、单个 SKILL.md 文件或市场下发的 .zip 压缩包——安装时自动读取 frontmatter（name/description，frontmatter 里可选的 `targets` 列表也会被采用），指令正文转换为本项目的目标 `.md` 文件，原始 SKILL.md 保留在包内供溯源；技能附带的可执行脚本**不会被安装或执行**。zip-slip 路径穿越会拒绝安装。
+
+- 技能是**项目级**的（存在项目 `skills/` 目录内），换项目不共享；把技能目录拷给别人即可分发。
+- 注入发生在 provider 层（与输出语言指令同一层），`INSTALLED SKILL` 系统消息出现在该智能体消息流的末尾；未被声明的智能体完全不受影响。
+- 技能指令会占用模型的上下文预算，指令文件建议保持在几百行以内。
+- 恶意清单/损坏的技能包在加载时被跳过，不会中断写作运行。
 
 ## 验证与开发
 

@@ -13,17 +13,24 @@ from novel.config import ModelConfig
 from novel.memory.assembler import RECENT_SUMMARY_K, assemble_context, continuity_compact_view
 from novel.memory.extractor import extract_updates
 from novel.memory.summarizer import digest_book, summarize_arc, summarize_chapter
-from novel.models import ChapterOutline, ChapterSummary, ReviewRecord, ReviewScore
+from novel.models import Arc, ChapterOutline, ChapterSummary, Character, ReviewRecord, ReviewScore
 from novel.project import NovelProject
 from novel.providers import ModelProvider
 from novel.resume import is_chapter_complete
 from novel.scorer_rubrics import apply_review, decide
-from novel.setup_flow import approve_stage, generate_stage, stage_done
+from novel.setup_flow import _detail_arc, _plan_arc_cast, approve_stage, generate_stage, stage_done
 from novel.store.bible import StoryBible
 from novel.store.notes import WritingNotes
 from novel.store.reviews import ReviewStore
 from novel.store.summaries import SummaryStore, detect_edited_chapters, sha256_text
 from novel.store.vector import VectorMemory
+
+
+def _gate_result(r: bool | tuple[bool, str | None]) -> tuple[bool, str | None]:
+    """Gate callbacks may return a plain bool (CLI) or (approved, feedback)
+    (GUI gate_with_feedback); normalize before any truthiness test — a
+    (False, ...) tuple is itself truthy and would read as approval."""
+    return r if isinstance(r, tuple) else (bool(r), None)
 
 
 @dataclass
@@ -54,7 +61,7 @@ def run_full_pipeline(
     language: str = "en",
     chapter_target_length: int = 2500,
     arc_lookahead: int = 5,
-    on_gate: Callable[[str, object], bool] | None = None,
+    on_gate: Callable[[str, object], bool | tuple[bool, str | None]] | None = None,
     on_event: Callable[[dict[str, object]], None] | None = None,
 ) -> PipelineState:
     state = PipelineState(premise=premise)
@@ -104,20 +111,70 @@ def run_full_pipeline(
     summaries = SummaryStore(proj)
 
     def detail_next_arc() -> bool:
-        """Rolling outline (spec §4.3): detail the next skeleton. Returns False
-        when the live-mode gate denied it (skeleton goes back, run continues)."""
+        """Rolling outline (spec §4.3): seed then detail the next skeleton.
+        First the arc_cast gate reviews proposed NEW characters for the volume
+        (feedback regenerates the proposal, bounded to 3 rounds; a plain deny
+        adds nobody; an empty proposal skips the gate silently). Approved cast
+        members are upserted BEFORE detailing, so the detailer's roster already
+        contains them. Then the arc_detail gate reviews the DETAILED volume:
+        approve persists it; feedback re-runs the detailer (≤3 rounds); a plain
+        deny discards the draft and re-queues the skeleton."""
         assert outline is not None and outline.arc_plan
         skeleton = outline.arc_plan.pop(0)
-        emit({"type": "stage", "stage": "arc_detail", "arc": skeleton.arc_name})
-        if on_gate and not on_gate("arc_detail", skeleton):
-            outline.arc_plan.insert(0, skeleton)
-            return False
         prev_name = outline.arcs[-1].arc_name if outline.arcs else ""
         prev_arc = summaries.get_arc_summary(prev_name) if prev_name else None
         existing_max = max((c.chapter_no for a in outline.arcs for c in a.chapters), default=0)
         recent = summaries.recent_chapter_summaries(upto=existing_max, k=RECENT_SUMMARY_K)
-        from novel.setup_flow import _detail_arc
-        arc = _detail_arc(provider, cfg_map, bible, skeleton, prev_arc, existing_max + 1, recent)
+
+        # --- volume cast seeding ---
+        emit({"type": "stage", "stage": "arc_cast", "arc": skeleton.arc_name})
+        cast_feedback: list[str] = []
+        new_chars: list[Character] = []
+        for attempt in range(1, 4):
+            proposal = _plan_arc_cast(provider, cfg_map, bible, skeleton, recent,
+                                      feedback=cast_feedback)
+            if not proposal:
+                break  # volume works with the existing cast: no interruption
+            if on_gate is None:
+                new_chars = proposal  # demo/provider-driven: auto-adopt
+                break
+            approved, fb = _gate_result(on_gate("arc_cast", proposal))
+            if approved:
+                new_chars = proposal
+                break
+            if not fb or attempt == 3:
+                emit({"type": "arc_cast_denied", "arc": skeleton.arc_name,
+                      "count": len(proposal)})
+                break
+            cast_feedback.append(fb)
+            emit({"type": "stage", "stage": "arc_cast_retry",
+                  "arc": skeleton.arc_name, "attempt": attempt + 1})
+        for ch in new_chars:
+            bible.upsert_character(ch)
+        if new_chars:
+            emit({"type": "arc_cast_done", "arc": skeleton.arc_name,
+                  "names": [c.name for c in new_chars]})
+
+        # --- volume detail ---
+        emit({"type": "stage", "stage": "arc_detail", "arc": skeleton.arc_name})
+        feedback: list[str] = []
+        arc: Arc | None = None
+        for attempt in range(1, 4):
+            arc = _detail_arc(provider, cfg_map, bible, skeleton, prev_arc,
+                              existing_max + 1, recent, feedback=feedback)
+            if on_gate is None:
+                break  # demo mode: no approval flow
+            approved, fb = _gate_result(on_gate("arc_detail", arc))
+            if approved:
+                break
+            if not fb or attempt == 3:
+                outline.arc_plan.insert(0, skeleton)
+                emit({"type": "arc_detail_denied", "arc": skeleton.arc_name})
+                return False
+            feedback.append(fb)
+            emit({"type": "stage", "stage": "arc_detail_retry",
+                  "arc": skeleton.arc_name, "attempt": attempt + 1})
+        assert arc is not None
         outline.arcs.append(arc)
         bible.set_outline(outline)
         emit({"type": "arc_detailed", "arc": skeleton.arc_name,
@@ -128,6 +185,8 @@ def run_full_pipeline(
     # detected (hash mismatch) and reported — state is NOT auto-rebuilt
     for n in detect_edited_chapters(proj, summaries):
         emit({"type": "warning", "warning": "chapter_edited", "chapter": n})
+
+    denied_arcs: set[str] = set()   # volumes the human rejected at the arc_detail gate
 
     def flat_chapters() -> list[tuple[str, ChapterOutline]]:
         return [(a.arc_name, c) for a in outline.arcs for c in a.chapters]
@@ -169,7 +228,10 @@ def run_full_pipeline(
         arc_name, ch_out = flat[idx]
         chapter_no = idx + 1
         while outline.arc_plan and len(flat) - (idx + 1) < arc_lookahead:
+            if outline.arc_plan[0].arc_name in denied_arcs:
+                break  # already rejected this run: no re-prompt, no wasted detail calls
             if not detail_next_arc():
+                denied_arcs.add(outline.arc_plan[0].arc_name)
                 break
             flat = flat_chapters()
         _backfill_prev_summary(chapter_no)
@@ -232,7 +294,8 @@ def run_full_pipeline(
                 prose = writer.run(type(ctx)(blocks=ctx.blocks + [f"[REWRITE NOTES] {feedback}"]))
                 attempt += 1
             if not final_ok:
-                approved = on_gate("chapter_review_failed", rs) if on_gate else False
+                approved = _gate_result(on_gate("chapter_review_failed", rs))[0] if on_gate \
+                    else False
                 if not approved:
                     state.error = f"chapter {chapter_no} rejected after {max_retries} attempts"
                     emit({"type": "chapter_skipped", "chapter": chapter_no,

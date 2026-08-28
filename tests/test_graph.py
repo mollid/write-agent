@@ -512,14 +512,22 @@ def test_auto_extend_details_next_arc_and_arc_summary(tmp_path):
         arcs=[Arc(arc_name="卷一", chapters=[
             ChapterOutline(chapter_no=i, chapter_title=f"T{i}", beats=[beat]) for i in (1, 2)])],
         arc_plan=[ArcSkeleton(arc_name="卷二", chapter_start=3, chapter_end=4, premise="p2")])
+    # seed the bible exactly like a resume from a two-phase setup run: the
+    # one-shot outliner no longer passes arc_plan through (hallucination guard),
+    # so the rolling queue only exists in already-persisted outlines
+    bible.set_concept(concept)
+    bible.set_world(World(setting="city"))
+    for c in chars:
+        bible.upsert_character(c)
+    bible.set_outline(skeleton_outline)
     passing = ReviewScore(artifact_type="chapter", overall=90,
                           scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
     arc2 = Arc(arc_name="卷二", chapters=[
         ChapterOutline(chapter_no=99, chapter_title="T3", beats=[beat]),   # wrong numbers on purpose
         ChapterOutline(chapter_no=100, chapter_title="T4", beats=[beat])])
     provider = _ArcSequenceProvider({
-        "strategist": concept, "worldbuilder": World(setting="city"), "character": chars,
-        "outliner": skeleton_outline, "writer": "Chapter prose text.", "continuity": "[]",
+        "writer": "Chapter prose text.", "continuity": "[]",
+        "cast_planner": [],
         "editor": "x", "scorer": passing,
         "extractor": {"character_states": {}, "voice_samples": {}, "mannerisms_used": {},
                       "key_events": [], "threads_advanced": [], "new_information_revealed": [],
@@ -554,14 +562,20 @@ def test_arc_detailer_receives_recent_chapter_summaries(tmp_path):
             ChapterOutline(chapter_no=i, chapter_title=f"T{i}", beats=[beat])
             for i in (1, 2, 3)])],
         arc_plan=[ArcSkeleton(arc_name="卷二", chapter_start=4, chapter_end=5, premise="p2")])
+    # resume-style seeded bible (one-shot outliner no longer carries arc_plan)
+    bible.set_concept(concept)
+    bible.set_world(World(setting="city"))
+    for c in chars:
+        bible.upsert_character(c)
+    bible.set_outline(skeleton_outline)
     passing = ReviewScore(artifact_type="chapter", overall=90,
                           scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
     arc2 = Arc(arc_name="卷二", chapters=[
         ChapterOutline(chapter_no=99, chapter_title="T4", beats=[beat]),
         ChapterOutline(chapter_no=100, chapter_title="T5", beats=[beat])])
     provider = _ArcSequenceProvider({
-        "strategist": concept, "worldbuilder": World(setting="city"), "character": chars,
-        "outliner": skeleton_outline, "writer": "Chapter prose text.", "continuity": "[]",
+        "writer": "Chapter prose text.", "continuity": "[]",
+        "cast_planner": [],
         "editor": "x", "scorer": passing,
         "extractor": {"character_states": {}, "voice_samples": {}, "mannerisms_used": {},
                       "key_events": [], "threads_advanced": [], "new_information_revealed": [],
@@ -578,3 +592,262 @@ def test_arc_detailer_receives_recent_chapter_summaries(tmp_path):
     block = user.split("<recent_chapter_summaries>")[1].split("</recent_chapter_summaries>")[0]
     assert "- ch1: 摘要。" in block          # recent chapter summary reached the detailer
     assert "(none)" not in block
+
+
+def _seeded_rolling_bible(tmp_path, n_vol1: int = 2):
+    """Bible seeded like a resume from two-phase setup: 卷一 detailed,
+    卷二 skeleton queued — the state detail_next_arc() operates on."""
+    proj, bible, vector, concept, _beat, _o, chars = _one_chapter_setup(tmp_path)
+    beat = ChapterBeat(pov="Ara", setting="t", event="e", emotional_turn="d", characters=["c1"])
+    bible.set_concept(concept)
+    bible.set_world(World(setting="city"))
+    for c in chars:
+        bible.upsert_character(c)
+    bible.set_outline(Outline(
+        arcs=[Arc(arc_name="卷一", chapters=[
+            ChapterOutline(chapter_no=i, chapter_title=f"T{i}", beats=[beat])
+            for i in range(1, n_vol1 + 1)])],
+        arc_plan=[ArcSkeleton(arc_name="卷二", chapter_start=n_vol1 + 1,
+                              chapter_end=n_vol1 + 6, premise="p2")]))
+    return proj, bible, vector, beat
+
+
+def _loop_responses(passing, beat, vol1_end: int):
+    return {
+        "writer": "Chapter prose text.", "continuity": "[]", "editor": "x", "scorer": passing,
+        "cast_planner": [],
+        "extractor": {"character_states": {}, "voice_samples": {}, "mannerisms_used": {},
+                      "key_events": [], "threads_advanced": [], "new_information_revealed": [],
+                      "chapter_summary": "摘要。"},
+        "summarizer": {"arc_name": "卷一", "chapter_start": 1, "chapter_end": vol1_end,
+                       "summary": "卷一摘要。", "major_developments": []},
+        "digestor": {"chapter_count": vol1_end, "current_arc": "卷一", "summary": "全书梗概。"},
+    }
+
+
+def test_arc_detail_gate_feedback_revisions_then_approves(tmp_path):
+    """live arc_detail gate reviews the DETAILED volume (not the skeleton):
+    feedback re-runs the detailer with the notes in its prompt; approve persists."""
+    proj, bible, vector, beat = _seeded_rolling_bible(tmp_path, n_vol1=2)
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
+    draft = Arc(arc_name="卷二", chapters=[
+        ChapterOutline(chapter_no=99, chapter_title=f"T{99 + i}", beats=[beat])  # wrong numbers
+        for i in range(3)])
+    provider = _ArcSequenceProvider(_loop_responses(passing, beat, 2), arcs=[draft, draft])
+    gated: list[tuple[str, object]] = []
+
+    def on_gate(label: str, artifact: object):
+        gated.append((label, artifact))
+        if label == "arc_detail" and sum(1 for l, _a in gated if l == "arc_detail") == 1:
+            return (False, "本卷太短，请按骨架规模细化到 6 章")
+        return True
+
+    state = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                              proj=proj, premise="a thief", target_chapters=5, arc_lookahead=2,
+                              on_gate=on_gate)
+    assert state.error is None and state.written == [1, 2, 3, 4, 5]
+    assert len(provider.arc_detailer_users) == 2          # one feedback revision round
+    assert "本卷太短" in provider.arc_detailer_users[1]    # notes threaded into round 2
+    assert gated[0][0] == "arc_detail"
+    assert isinstance(gated[0][1], Arc) and len(gated[0][1].chapters) == 3  # detailed volume
+    outline = bible.get_outline()
+    assert [a.arc_name for a in outline.arcs] == ["卷一", "卷二"]
+    assert [c.chapter_no for c in outline.arcs[1].chapters] == [3, 4, 5]  # renumbered tail
+    assert outline.arc_plan == []
+
+
+def test_arc_detail_gate_plain_deny_requeues_skeleton(tmp_path):
+    """A deny without feedback discards the draft and puts the skeleton back —
+    the run continues, writing stops at the runway with `outline exhausted`."""
+    proj, bible, vector, beat = _seeded_rolling_bible(tmp_path, n_vol1=2)
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
+    draft = Arc(arc_name="卷二", chapters=[ChapterOutline(chapter_no=99, chapter_title="T3",
+                                                          beats=[beat])])
+    provider = _ArcSequenceProvider(_loop_responses(passing, beat, 2), arcs=[draft])
+    events: list[dict] = []
+
+    def on_gate(label: str, artifact: object):
+        return label != "arc_detail"
+
+    state = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                              proj=proj, premise="a thief", target_chapters=4, arc_lookahead=2,
+                              on_gate=on_gate, on_event=events.append)
+    assert state.written == [1, 2]
+    assert state.error and "outline exhausted" in state.error
+    assert any(e.get("type") == "arc_detail_denied" for e in events)
+    assert len(provider.arc_detailer_users) == 1  # denied once → no re-prompt this run
+    outline = bible.get_outline()
+    assert [a.arc_name for a in outline.arcs] == ["卷一"]
+    assert [s.arc_name for s in outline.arc_plan] == ["卷二"]  # skeleton re-queued
+
+
+def test_arc_detail_gate_three_feedback_rounds_then_gives_up(tmp_path):
+    """Feedback rounds are bounded (3 detailer calls per volume); after that the
+    skeleton goes back to the queue instead of looping forever."""
+    proj, bible, vector, beat = _seeded_rolling_bible(tmp_path, n_vol1=2)
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
+    draft = Arc(arc_name="卷二", chapters=[ChapterOutline(chapter_no=99, chapter_title="T3",
+                                                          beats=[beat])])
+    provider = _ArcSequenceProvider(_loop_responses(passing, beat, 2),
+                                    arcs=[draft, draft, draft, draft])
+
+    def on_gate(label: str, artifact: object):
+        return (False, "再来一版") if label == "arc_detail" else True
+
+    state = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                              proj=proj, premise="a thief", target_chapters=4, arc_lookahead=2,
+                              on_gate=on_gate)
+    assert len(provider.arc_detailer_users) == 3
+    assert state.written == [1, 2]
+    outline = bible.get_outline()
+    assert [a.arc_name for a in outline.arcs] == ["卷一"]
+    assert [s.arc_name for s in outline.arc_plan] == ["卷二"]
+
+
+# ---------- arc_cast gate: per-volume cast seeding ----------
+
+def _cast(char_id: str, role: str = "antagonist") -> dict:
+    return {"id": char_id, "slug": char_id, "name": char_id.upper(), "role": role,
+            "backstory": "a wound and a secret", "motivation": "concrete want",
+            "arc": "s→m→e"}
+
+
+def test_arc_cast_gate_approve_seeds_new_characters(tmp_path):
+    """Approved proposals are upserted BEFORE the volume is detailed, so the
+    detailer's roster already contains the new cast."""
+    proj, bible, vector, beat = _seeded_rolling_bible(tmp_path, n_vol1=2)
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
+    draft = Arc(arc_name="卷二", chapters=[ChapterOutline(chapter_no=99, chapter_title="T3",
+                                                          beats=[beat])])
+    responses = _loop_responses(passing, beat, 2)
+    responses["cast_planner"] = [_cast("ant-mara"), _cast("sup-tao", "support")]
+    provider = _ArcSequenceProvider(responses, arcs=[draft])
+    gated: list[str] = []
+
+    def on_gate(label: str, artifact: object):
+        gated.append(label)
+        return True
+
+    state = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                              proj=proj, premise="a thief", target_chapters=3, arc_lookahead=2,
+                              on_gate=on_gate)
+    assert state.error is None and state.written == [1, 2, 3]
+    assert "arc_cast" in gated and gated[0] == "arc_cast"  # cast gate precedes detail gate
+    assert bible.get_character("ant-mara") is not None
+    assert bible.get_character("sup-tao") is not None
+    assert "ant-mara" in provider.arc_detailer_users[0]  # roster reached the detailer
+
+
+def test_arc_cast_gate_deny_skips_seeding_but_details_volume(tmp_path):
+    """Plain deny = 本卷不新增角色: nothing upserted, the volume still details."""
+    proj, bible, vector, beat = _seeded_rolling_bible(tmp_path, n_vol1=2)
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
+    draft = Arc(arc_name="卷二", chapters=[ChapterOutline(chapter_no=99, chapter_title="T3",
+                                                          beats=[beat])])
+    responses = _loop_responses(passing, beat, 2)
+    responses["cast_planner"] = [_cast("ant-mara")]
+    provider = _ArcSequenceProvider(responses, arcs=[draft])
+
+    def on_gate(label: str, artifact: object):
+        return label != "arc_cast"
+
+    state = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                              proj=proj, premise="a thief", target_chapters=3, arc_lookahead=2,
+                              on_gate=on_gate)
+    assert state.error is None and state.written == [1, 2, 3]
+    assert bible.get_character("ant-mara") is None
+    assert [a.arc_name for a in bible.get_outline().arcs] == ["卷一", "卷二"]
+
+
+def test_arc_cast_gate_feedback_round_replans(tmp_path):
+    """Feedback on the cast proposal regenerates it (bounded rounds); only the
+    approved revision's characters are upserted."""
+    proj, bible, vector, beat = _seeded_rolling_bible(tmp_path, n_vol1=2)
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
+    draft = Arc(arc_name="卷二", chapters=[ChapterOutline(chapter_no=99, chapter_title="T3",
+                                                          beats=[beat])])
+    cast_users: list[str] = []
+
+    class _CastSeqProvider(_ArcSequenceProvider):
+        def __init__(self, responses, arcs, casts):
+            super().__init__(responses, arcs)
+            self._casts = list(casts)
+
+        def _lookup(self, messages):
+            from novel.providers import _agent_tag
+            if _agent_tag(messages, self.tag_key) == "cast_planner":
+                cast_users.append(str(messages[-1]["content"]))
+                return self._casts.pop(0)
+            return super()._lookup(messages)
+
+    responses = _loop_responses(passing, beat, 2)
+    provider = _CastSeqProvider(responses, arcs=[draft],
+                                casts=[[_cast("ant-mara")], [_cast("ant-vora")]])
+    gated: list[tuple[str, object]] = []
+
+    def on_gate(label: str, artifact: object):
+        gated.append((label, artifact))
+        if label == "arc_cast" and len(gated) == 1:
+            return (False, "反派动机要更立体，与地窟旧怨挂钩")
+        return True
+
+    state = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                              proj=proj, premise="a thief", target_chapters=3, arc_lookahead=2,
+                              on_gate=on_gate)
+    assert state.error is None
+    assert len(cast_users) == 2
+    assert "反派动机要更立体" in cast_users[1]
+    assert bible.get_character("ant-mara") is None
+    assert bible.get_character("ant-vora") is not None
+
+
+def test_arc_cast_proposal_filters_protagonist_and_id_collisions(tmp_path):
+    """Demo/auto mode adopts the proposal, but defensive filters drop a second
+    protagonist and ids that would overwrite existing characters."""
+    proj, bible, vector, beat = _seeded_rolling_bible(tmp_path, n_vol1=2)
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
+    draft = Arc(arc_name="卷二", chapters=[ChapterOutline(chapter_no=99, chapter_title="T3",
+                                                          beats=[beat])])
+    responses = _loop_responses(passing, beat, 2)
+    responses["cast_planner"] = [
+        _cast("c1", "support"),              # collides with seeded protagonist id
+        _cast("new-prot", "protagonist"),    # must never dethrone the lead
+        _cast("ant-ok", "antagonist"),
+    ]
+    provider = _ArcSequenceProvider(responses, arcs=[draft])
+    state = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                              proj=proj, premise="a thief", target_chapters=3, arc_lookahead=2)
+    assert state.error is None
+    assert bible.get_character("c1").role == "protagonist"  # untouched
+    assert bible.get_character("new-prot") is None
+    assert bible.get_character("ant-ok") is not None
+
+
+def test_arc_cast_empty_proposal_skips_gate(tmp_path):
+    """No proposal → no gate interruption; the volume details straight away."""
+    proj, bible, vector, beat = _seeded_rolling_bible(tmp_path, n_vol1=2)
+    passing = ReviewScore(artifact_type="chapter", overall=90,
+                          scores={"beat_adherence": DimensionScore(score=90, critique="ok")})
+    draft = Arc(arc_name="卷二", chapters=[ChapterOutline(chapter_no=99, chapter_title="T3",
+                                                          beats=[beat])])
+    responses = _loop_responses(passing, beat, 2)
+    responses["cast_planner"] = []
+    provider = _ArcSequenceProvider(responses, arcs=[draft])
+    gated: list[str] = []
+
+    def on_gate(label: str, artifact: object):
+        gated.append(label)
+        return True
+
+    state = run_full_pipeline(provider=provider, cfg_map=_cfg_map(), bible=bible, vector=vector,
+                              proj=proj, premise="a thief", target_chapters=3, arc_lookahead=2,
+                              on_gate=on_gate)
+    assert state.error is None and state.written == [1, 2, 3]
+    assert "arc_cast" not in gated

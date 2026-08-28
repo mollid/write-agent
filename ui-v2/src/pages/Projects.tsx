@@ -5,6 +5,7 @@ import {
   Empty,
   Form,
   Input,
+  InputNumber,
   List,
   Modal,
   Select,
@@ -27,6 +28,7 @@ const GENRES = [
 interface CreateValues {
   name: string;
   genre: string;
+  targetChapters?: number;
 }
 
 /** Task 9: project list + create modal (name required ≤64, genre default fantasy). */
@@ -40,7 +42,12 @@ export default function Projects() {
 
   async function submit(values: CreateValues) {
     try {
-      await create.mutateAsync(values);
+      await create.mutateAsync({
+        name: values.name,
+        genre: values.genre,
+        // undefined is dropped by JSON.stringify → short-form projects stay clean
+        target_chapters: values.targetChapters || undefined,
+      });
       message.success(`项目 ${values.name} 已创建`);
       setOpen(false);
       form.resetFields();
@@ -109,6 +116,19 @@ export default function Projects() {
           </Form.Item>
           <Form.Item name="genre" label="类型" rules={[{ required: true, message: "请选择类型" }]}>
             <Select options={GENRES} />
+          </Form.Item>
+          <Form.Item
+            name="targetChapters"
+            label="计划全书章数"
+            extra="长篇小说请填写（如 660）：启用两段式大纲——先出全书卷骨架，写作时逐卷细化。留空为短篇一次性大纲。"
+          >
+            <InputNumber
+              min={1}
+              max={5000}
+              style={{ width: "100%" }}
+              data-testid="project-target-input"
+              placeholder="留空 = 短篇"
+            />
           </Form.Item>
           <Space>
             <Button onClick={() => setOpen(false)}>取消</Button>

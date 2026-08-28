@@ -1,7 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import { p } from "../constants";
-import type { AudioInfo, BibleData, OutlineInfo, ProjectStatus, ReviewRecord, Thread } from "./types";
+import type {
+  AudioInfo,
+  BibleData,
+  OutlineInfo,
+  ProjectConfig,
+  ProjectStatus,
+  ReviewRecord,
+  Thread,
+} from "./types";
 
 export interface ProjectSummary {
   name: string;
@@ -76,18 +84,40 @@ export function useBible(name: string) {
   });
 }
 
+export function useProjectConfig(name: string) {
+  return useQuery({
+    queryKey: ["config", name],
+    queryFn: () => api<ProjectConfig>(`${p(name)}/config`),
+    enabled: !!name,
+  });
+}
+
 // ---------- mutations ----------
 
 export function useCreateProject() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { name: string; genre: string }) =>
+    mutationFn: (vars: { name: string; genre: string; target_chapters?: number }) =>
       api<{ name: string; root: string }>("/api/projects", {
         method: "POST",
         body: JSON.stringify(vars),
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+}
+
+export function useUpdateProjectConfig(name: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { target_chapters: number | null }) =>
+      api<{ ok: boolean; target_chapters: number | null }>(`${p(name)}/config`, {
+        method: "PUT",
+        body: JSON.stringify(vars),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["config", name] });
     },
   });
 }

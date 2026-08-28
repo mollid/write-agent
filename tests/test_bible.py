@@ -1,3 +1,5 @@
+import json
+
 from novel.models import Character, Concept, Event, Foreshadow
 from novel.project import NovelProject
 from novel.store.bible import StoryBible
@@ -98,3 +100,78 @@ def test_list_events_tail_only(tmp_path):
     tail = bible.list_events(last=3)
     assert [e.id for e in tail] == ["e8", "e9", "e10"]
     assert len(bible.list_events()) == 10
+
+
+# ---------- bible version history (.meta/bible_versions) ----------
+
+def _concept(logline: str) -> Concept:
+    return Concept(logline=logline, genre="g", tone="t", themes=["x"],
+                   target_length_words=30000, audience="a")
+
+
+def _char(cid: str = "c1", name: str = "Ara") -> Character:
+    return Character(id=cid, slug=cid, name=name, role="protagonist",
+                     backstory="b", motivation="m", arc="a")
+
+
+def _versions_dir(b: StoryBible):
+    return b.proj.root / ".meta" / "bible_versions"
+
+
+def test_section_overwrite_snapshots_previous_version(tmp_path):
+    from novel.models import World
+    b = _bible(tmp_path)
+    b.set_concept(_concept("v1"))
+    b.set_world(World(setting="w1"))
+    b.set_concept(_concept("v2"))
+    b.set_world(World(setting="w2"))
+    files = sorted(p.name for p in _versions_dir(b).glob("*.json"))
+    assert len(files) == 2  # one snapshot per real overwrite
+    concept_backup = json.loads((_versions_dir(b) / files[0]).read_text(encoding="utf-8"))
+    assert concept_backup["logline"] == "v1"       # the OLD version is recoverable
+    world_backup = json.loads((_versions_dir(b) / files[1]).read_text(encoding="utf-8"))
+    assert world_backup["setting"] == "w1"
+
+
+def test_identical_rewrite_does_not_snapshot(tmp_path):
+    b = _bible(tmp_path)
+    b.set_concept(_concept("same"))
+    b.set_concept(_concept("same"))
+    assert not _versions_dir(b).exists() or not list(_versions_dir(b).glob("*.json"))
+
+
+def test_character_overwrite_snapshots_old_card_new_append_does_not(tmp_path):
+    b = _bible(tmp_path)
+    b.upsert_character(_char("c1", "Ara"))
+    assert not _versions_dir(b).exists()           # first insert: nothing to lose
+    b.upsert_character(_char("c1", "Ara-rewritten"))
+    b.upsert_character(_char("c2", "Vee"))         # new char: still nothing to snapshot
+    backups = list(_versions_dir(b).glob("character-c1-*.json"))
+    assert len(backups) == 1
+    assert json.loads(backups[0].read_text(encoding="utf-8"))["name"] == "Ara"
+
+
+def test_set_characters_snapshots_whole_previous_roster(tmp_path):
+    b = _bible(tmp_path)
+    b.upsert_character(_char("c1", "Ara"))
+    b.upsert_character(_char("c2", "Vee"))
+    b.set_characters([_char("c1", "Ara-v2")])
+    backups = list(_versions_dir(b).glob("characters-*.json"))
+    assert len(backups) == 1
+    roster = json.loads(backups[0].read_text(encoding="utf-8"))
+    assert [c["id"] for c in roster] == ["c1", "c2"]   # full old roster recoverable
+    assert [c.name for c in b.all_characters()] == ["Ara-v2"]
+
+
+def test_chapter_state_updates_do_not_snapshot(tmp_path):
+    """Per-chapter state/voice churn is progression, not settings overwrite —
+    a version file per chapter would bury real history."""
+    from novel.memory.extractor import ChapterUpdates
+    from novel.models import CharacterState
+    b = _bible(tmp_path)
+    b.upsert_character(_char("c1", "Ara"))
+    b.apply_chapter_updates(1, ChapterUpdates(
+        character_states={"c1": CharacterState(emotional_state="angry")},
+        voice_samples={"c1": "drawl"}, mannerisms_used={}, key_events=[],
+        threads_advanced=[], new_information_revealed=[], chapter_summary="s"), [])
+    assert not _versions_dir(b).exists()

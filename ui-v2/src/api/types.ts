@@ -8,6 +8,17 @@ export interface ProjectStatus {
   score_min: number;
   job: { id: string; kind: string; status: string; error: string | null } | null;
 }
+/** Secret-free subset of project.config.yaml (models/api_key never included). */
+export interface ProjectConfig {
+  target_chapters: number | null;
+  arc_detail_lookahead: number;
+  chapter_target_length: number;
+  context_token_budget: number;
+  human_gate_every_n_chapters: number;
+  score_min: number;
+  max_retries: number;
+  language: string;
+}
 export interface ReviewRecord {
   chapter: number;
   attempt: number;

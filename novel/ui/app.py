@@ -21,6 +21,7 @@ DIST_DIR = Path(__file__).resolve().parents[2] / "ui-v2" / "dist"
 class CreateProjectReq(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     genre: str = "fantasy"
+    target_chapters: int | None = Field(default=None, ge=1, le=5000)
 
 
 class PremiseReq(BaseModel):
@@ -68,6 +69,12 @@ class ChapterSaveReq(BaseModel):
     content: str = Field(min_length=1)
 
 
+class ProjectConfigUpdateReq(BaseModel):
+    """Exposed generation settings. null target_chapters clears the key
+    (back to the one-shot outline); model credentials are never editable here."""
+    target_chapters: int | None = Field(default=None, ge=1, le=5000)
+
+
 def _safe_project(root: Path, name: str) -> Path:
     if Path(name).name != name or name in (".", ".."):
         raise HTTPException(status_code=400, detail="非法项目名")
@@ -103,8 +110,46 @@ def create_app(root: Path) -> FastAPI:
             raise HTTPException(status_code=400, detail="非法项目名")
         if (root / req.name).exists():
             raise HTTPException(status_code=409, detail=f"目录已存在: {req.name}")
-        proj = NovelProject.scaffold(req.name, genre=req.genre, root=root)
+        proj = NovelProject.scaffold(req.name, genre=req.genre, root=root,
+                                     target_chapters=req.target_chapters)
         return {"name": req.name, "root": str(proj.root)}
+
+    @app.get("/api/projects/{name}/config")
+    def get_project_config(name: str) -> dict[str, object]:
+        """Secret-free subset of project.config.yaml (models/api_key never leave)."""
+        p = _safe_project(root, name)
+        from novel.config import load_config
+        from novel.project import NovelProject
+        cfg = load_config(NovelProject(root=p).config_path)
+        return {
+            "target_chapters": cfg.generation.target_chapters,
+            "arc_detail_lookahead": cfg.generation.arc_detail_lookahead,
+            "chapter_target_length": cfg.generation.chapter_target_length,
+            "context_token_budget": cfg.generation.context_token_budget,
+            "human_gate_every_n_chapters": cfg.generation.human_gate_every_n_chapters,
+            "score_min": cfg.thresholds.score_min,
+            "max_retries": cfg.thresholds.max_retries,
+            "language": cfg.language,
+        }
+
+    @app.put("/api/projects/{name}/config")
+    def update_project_config(name: str, req: ProjectConfigUpdateReq) -> dict[str, object]:
+        """Surgical update of the exposed settings in project.config.yaml; the
+        models section (including api keys) round-trips untouched."""
+        p = _safe_project(root, name)
+        import yaml
+
+        from novel.project import NovelProject
+        cfg_path = NovelProject(root=p).config_path
+        raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        gen = raw.setdefault("generation", {})
+        if req.target_chapters is None:
+            gen.pop("target_chapters", None)
+        else:
+            gen["target_chapters"] = req.target_chapters
+        cfg_path.write_text(yaml.safe_dump(raw, allow_unicode=True, sort_keys=False),
+                            encoding="utf-8")
+        return {"ok": True, "target_chapters": req.target_chapters}
 
     @app.get("/api/projects/{name}/status")
     def project_status(name: str) -> dict[str, object]:

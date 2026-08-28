@@ -451,3 +451,71 @@ def test_ui_v2_dist_served(tmp_path: Path) -> None:
     # API 404s must stay JSON 404s, never the SPA shell
     r = client.get("/api/nope")
     assert r.status_code == 404 and "detail" in r.json()
+
+
+# ---------- longform: creation-time / runtime target_chapters wiring ----------
+
+def test_create_project_with_target_chapters(client: TestClient, tmp_path: Path) -> None:
+    """Creation carries the whole-book plan straight into project.config.yaml."""
+    r = client.post("/api/projects",
+                    json={"name": "long", "genre": "fantasy", "target_chapters": 660})
+    assert r.status_code == 201
+    cfg = (tmp_path / "long" / "project.config.yaml").read_text(encoding="utf-8")
+    assert "target_chapters: 660" in cfg
+    r = client.post("/api/projects", json={"name": "bad", "target_chapters": 0})
+    assert r.status_code == 422
+
+
+def test_project_config_get_and_put(client: TestClient, tmp_path: Path) -> None:
+    """GET exposes a secret-free subset; PUT updates target_chapters surgically
+    (set → write key, null → remove key) without touching model credentials."""
+    client.post("/api/projects", json={"name": "cfg"})
+    r = client.get("/api/projects/cfg/config")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["target_chapters"] is None
+    assert "models" not in body and "api_key" not in body  # secrets never leave the server
+
+    r = client.put("/api/projects/cfg/config", json={"target_chapters": 660})
+    assert r.status_code == 200
+    assert client.get("/api/projects/cfg/config").json()["target_chapters"] == 660
+    cfg_path = tmp_path / "cfg" / "project.config.yaml"
+    assert "target_chapters: 660" in cfg_path.read_text(encoding="utf-8")
+    assert "zhipu" in cfg_path.read_text(encoding="utf-8")  # models section untouched
+
+    assert client.put("/api/projects/cfg/config",
+                      json={"target_chapters": None}).status_code == 200
+    assert client.get("/api/projects/cfg/config").json()["target_chapters"] is None
+    assert "target_chapters" not in cfg_path.read_text(encoding="utf-8")
+    assert client.put("/api/projects/cfg/config",
+                      json={"target_chapters": -1}).status_code == 422
+
+
+def test_run_setup_job_two_phase_when_target_chapters_configured(tmp_path: Path) -> None:
+    """Guided setup must honor generation.target_chapters: the demo planner's
+    第一卷 gets detailed while 第二卷 stays queued in arc_plan (two-phase)."""
+    from novel.project import NovelProject
+    from novel.store.bible import StoryBible
+
+    proj = NovelProject.scaffold("lf", genre="fantasy", root=tmp_path)
+    raw = proj.config_path.read_text(encoding="utf-8")
+    proj.config_path.write_text(raw.replace(
+        "  context_token_budget: 24000\n",
+        "  context_token_budget: 24000\n  target_chapters: 12\n"), encoding="utf-8")
+    m = jobs.JobManager()
+    q = m.bus.subscribe("lf")
+    job = m.start("lf", "setup", jobs.run_setup_job(proj.root, "a thief"))
+    try:
+        deadline = time.time() + 30.0
+        while job.thread.is_alive() and time.time() < deadline:
+            gate_id = _next_gate(q, job.id)
+            if gate_id is None:
+                break  # job_end
+            m.resolve_gate(gate_id, True)  # approve every stage artifact
+        assert job.status == "done", job.error
+        outline = StoryBible(proj).get_outline()
+        assert outline is not None
+        assert [a.arc_name for a in outline.arcs] == ["第一卷"]
+        assert [s.arc_name for s in outline.arc_plan] == ["第二卷"]  # queue ≠ one-shot
+    finally:
+        job.thread.join(timeout=5)

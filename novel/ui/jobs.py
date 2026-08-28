@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from novel.models import Character, Concept, Foreshadow, Outline, World
 from novel.render import artifact_text
+from novel.skills import load_skills
 from novel.store.bible import StoryBible
 
 
@@ -185,7 +186,7 @@ def run_premise_job(proj_root: Path, text: str) -> Callable[[Job], object]:
         proj = NovelProject(root=proj_root)
         job.emit({"type": "stage", "stage": "strategist"})
         cfg = load_config(proj.config_path)
-        provider = make_provider(cfg)
+        provider = make_provider(cfg, skills=load_skills(proj.root))
         concept = StrategistAgent(provider, cfg.model_for("strategist")).run(text)
         StoryBible(proj).set_concept(concept)
         job.emit({"type": "premise_done", "genre": concept.genre})
@@ -205,7 +206,7 @@ def run_setup_job(proj_root: Path, premise: str) -> Callable[[Job], object]:
 
         proj = NovelProject(root=proj_root)
         cfg = load_config(proj.config_path)
-        provider = make_provider(cfg)
+        provider = make_provider(cfg, skills=load_skills(proj.root))
         bible = StoryBible(proj)
         notes = WritingNotes(proj)
         cfg_map = {name: cfg.model_for(name) for name in AGENT_NAMES}
@@ -216,7 +217,8 @@ def run_setup_job(proj_root: Path, premise: str) -> Callable[[Job], object]:
             feedback: list[str] = []
             while True:
                 artifact = generate_stage(stage, provider=provider, cfg_map=cfg_map,
-                                          bible=bible, premise=premise, feedback=feedback)
+                                          bible=bible, premise=premise, feedback=feedback,
+                                          target_chapters=cfg.generation.target_chapters)
                 job.emit({"type": "setup_stage", "stage": stage, "attempt": len(feedback) + 1,
                           "artifact": artifact_text(artifact)})
                 approved, fb = job.gate_with_feedback(f"setup:{stage}", artifact)
@@ -249,7 +251,7 @@ def run_chapters_job(proj_root: Path, n: int) -> Callable[[Job], object]:
 
         proj = NovelProject(root=proj_root)
         cfg = load_config(proj.config_path)
-        provider = make_provider(cfg)
+        provider = make_provider(cfg, skills=load_skills(proj.root))
         bible = StoryBible(proj)
         vector = VectorMemory(proj, embed=hash_embed)
         cfg_map = {name: cfg.model_for(name) for name in AGENT_NAMES}
@@ -269,7 +271,9 @@ def run_chapters_job(proj_root: Path, n: int) -> Callable[[Job], object]:
             language=cfg.language,
             chapter_target_length=cfg.generation.chapter_target_length,
             arc_lookahead=cfg.generation.arc_detail_lookahead,
-            on_gate=job.gate if is_live_mode() else None,
+            # gate_with_feedback so the arc_detail gate can carry revision notes
+            # back into the detailer (plain bool for every other gate type)
+            on_gate=job.gate_with_feedback if is_live_mode() else None,
             on_event=job.emit,
         )
     return fn
@@ -346,7 +350,7 @@ def run_chapter_rewrite_job(proj_root: Path, chapter_no: int, mode: str,
             # until the first event the UI has no signal the job is alive
             job.emit({"type": "stage", "stage": "rewriting", "chapter": chapter_no})
             if is_live_mode():
-                provider = make_provider(cfg)
+                provider = make_provider(cfg, skills=load_skills(proj.root))
                 draft = ChapterRewriteAgent(provider, cfg.model_for("rewriter")).run(
                     RewriteInput(chapter_no=chapter_no, title=title, mode=mode,
                                  instruction=cur_instruction, original=original,
@@ -408,7 +412,7 @@ def run_bible_chat_job(proj_root: Path, section: str, instruction: str,
             current = current_artifact()
             current_json = current.model_dump_json()  # type: ignore[attr-defined]
             if is_live_mode():
-                provider = make_provider(cfg)
+                provider = make_provider(cfg, skills=load_skills(proj.root))
                 draft = SettingEditorAgent(provider, cfg.model_for("setting_editor"),
                                            schema).run(SettingEditInput(
                     current_json=current_json, instruction=cur_instruction, history=history))
@@ -442,7 +446,7 @@ def run_outline_extend_job(proj_root: Path, n: int) -> Callable[[Job], object]:
     from novel.models import Arc, ChapterBeat, ChapterOutline, ForeshadowStatus
     from novel.project import NovelProject
     from novel.runtime import is_live_mode, make_provider
-    from novel.setup_flow import merge_foreshadow_ledger
+    from novel.setup_flow import merge_foreshadow_ledger, merge_outline_extension
     from novel.store.bible import StoryBible
 
     def fn(job: Job) -> object:
@@ -456,7 +460,7 @@ def run_outline_extend_job(proj_root: Path, n: int) -> Callable[[Job], object]:
         assert concept is not None and world is not None, "concept+world required"
         assert existing is not None, "outline is empty"
         if is_live_mode():
-            provider = make_provider(cfg)
+            provider = make_provider(cfg, skills=load_skills(proj.root))
             draft = OutlinerExtendAgent(provider, cfg.model_for("outliner")).run(
                 OutlineExtendInput(concept=concept, world=world, characters=roster,
                                    current=existing, recent_events=bible.list_events(),
@@ -478,9 +482,9 @@ def run_outline_extend_job(proj_root: Path, n: int) -> Callable[[Job], object]:
         approved, _fb = job.gate_with_feedback("bible:outline_extend", draft)
         if not approved:
             return None
-        for arc in draft.arcs:          # draft = agent 输出的纯新增章
-            existing.arcs.append(arc)   # 追加弧（agent prompt 已保证编号续接）
-        existing.foreshadow_ledger.extend(draft.foreshadow_ledger)
+        # draft chapters are renumbered onto the existing tail; hallucinated
+        # draft.arc_plan entries never enter the rolling queue
+        merge_outline_extension(existing, draft)
         bible.set_outline(existing)
         merge_foreshadow_ledger(existing, bible)
         job.emit({"type": "outline_extended", "added": n})
@@ -526,7 +530,12 @@ def validate_bible_section(section: str, data: object) -> object:
         assert isinstance(data, list)
         return [Foreshadow.model_validate(f) for f in data]
     if section in _SECTION_MODELS:
-        return _SECTION_MODELS[section].model_validate(data)
+        parsed = _SECTION_MODELS[section].model_validate(data)
+        if section == "outline":
+            from novel.setup_flow import validate_outline
+            assert isinstance(parsed, Outline)
+            validate_outline(parsed)  # manual PUT must not break position mapping
+        return parsed
     raise ValueError(f"unknown section: {section}")
 
 
@@ -536,9 +545,8 @@ def save_bible_section(bible: StoryBible, section: str, artifact: object) -> Non
     elif section == "world":
         bible.set_world(artifact)  # type: ignore[arg-type]
     elif section == "characters":
-        d = bible.proj.load_canonical()
-        d["characters"] = [ch.model_dump() for ch in artifact]  # type: ignore[attr-defined]
-        bible.proj.save_canonical(d)
+        # full-roster replace: set_characters snapshots the old roster first
+        bible.set_characters(artifact)  # type: ignore[arg-type]
     elif section == "outline":
         bible.set_outline(artifact)  # type: ignore[arg-type]
     elif section == "foreshadows":
@@ -587,7 +595,10 @@ def run_tts_job(proj_root: Path, chapter: int, voice: str, rate: str,
         audio_dir.mkdir(parents=True, exist_ok=True)
         out = audio_dir / f"{chapter:03d}.mp3"
         if is_live_mode():
-            synth_to_file(text, voice, rate, volume, pitch, out)
+            from novel.config import load_config
+            from novel.project import NovelProject
+            cfg = load_config(NovelProject(root=proj_root).config_path)
+            synth_to_file(text, voice, rate, volume, pitch, out, proxy=cfg.network.proxy)
         else:
             tmp = out.with_suffix(out.suffix + ".tmp")
             tmp.write_bytes(SILENT_MP3)

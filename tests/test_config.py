@@ -102,3 +102,25 @@ def test_generation_longform_fields_default_off():
     from novel.config import Generation
     g = Generation()
     assert g.target_chapters is None and g.chapter_target_length == 2500 and g.arc_detail_lookahead == 5
+
+
+def test_network_proxy_config_parses(tmp_path):
+    proj = NovelProject.scaffold("n", genre="g", root=tmp_path)
+    proj.config_path.write_text(
+        "models: { default: { provider: openai, model: x } }\n"
+        "network:\n"
+        "  proxy: http://127.0.0.1:7890\n"
+        "  no_proxy: localhost,127.0.0.1\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(proj.config_path)
+    assert cfg.network.proxy == "http://127.0.0.1:7890"
+    assert cfg.network.no_proxy == "localhost,127.0.0.1"
+
+
+def test_network_config_defaults_when_absent(tmp_path):
+    from novel.config import NetworkConfig
+    proj = NovelProject.scaffold("n", genre="g", root=tmp_path)
+    cfg = load_config(proj.config_path)
+    assert cfg.network.proxy is None and cfg.network.no_proxy is None
+    assert NetworkConfig().proxy is None

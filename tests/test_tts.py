@@ -53,6 +53,25 @@ def test_synth_to_file_passes_params_and_writes_atomically(tmp_path, monkeypatch
     assert not (tmp_path / "003.mp3.tmp").exists()
 
 
+def test_synth_to_file_passes_proxy(tmp_path, monkeypatch):
+    """network.proxy 从配置一路传到 edge_tts.Communicate（None 时直连）。"""
+    recorded = {}
+
+    class _FakeCommunicate:
+        def __init__(self, text, voice, *, rate, volume, pitch, proxy=None, **_kw):
+            recorded["proxy"] = proxy
+
+        async def save(self, out):
+            out.write(b"x")
+
+    monkeypatch.setattr("novel.tts.edge_tts", type("M", (), {"Communicate": _FakeCommunicate}))
+    synth_to_file("t", DEFAULT_VOICE, "+0%", "+0%", "+0Hz", tmp_path / "a.mp3",
+                  proxy="http://127.0.0.1:7890")
+    assert recorded["proxy"] == "http://127.0.0.1:7890"
+    synth_to_file("t", DEFAULT_VOICE, "+0%", "+0%", "+0Hz", tmp_path / "b.mp3")
+    assert recorded["proxy"] is None
+
+
 def test_synth_to_file_retries_then_raises(tmp_path, monkeypatch):
     attempts = {"n": 0}
 

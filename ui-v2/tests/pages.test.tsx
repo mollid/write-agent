@@ -67,6 +67,7 @@ function stubFetchFor(over: {
   putBibleStatus?: number;
   putBibleDetail?: string;
   audio?: { chapter: number; size: number }[];
+  config?: object;
 } = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -76,6 +77,14 @@ function stubFetchFor(over: {
       return new Response(JSON.stringify(over.projects ?? []), { status: 200 });
     if (url === "/api/projects/x/status")
       return new Response(JSON.stringify({ ...baseStatus, ...over.status }), { status: 200 });
+    if (url === "/api/projects/x/config") {
+      if (init?.method === "PUT")
+        return new Response(JSON.stringify({ ok: true, target_chapters: null }), { status: 200 });
+      return new Response(
+        JSON.stringify(over.config ?? { target_chapters: null, language: "en" }),
+        { status: 200 },
+      );
+    }
     if (url === "/api/projects/x/outline")
       return new Response(JSON.stringify(over.outline ?? { arcs: [] }), { status: 200 });
     if (url === "/api/projects/x/reviews")
@@ -368,7 +377,7 @@ test("Generate: start posts {n}; progress counts chapter_done AND chapter_skippe
   });
   renderGenerate();
 
-  fireEvent.change(await screen.findByRole("spinbutton"), { target: { value: "3" } });
+  fireEvent.change(await screen.findByTestId("n-input"), { target: { value: "3" } });
   fireEvent.click(screen.getByTestId("start-generate"));
   await waitFor(() => {
     const call = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/write-chapter"));
@@ -1168,5 +1177,49 @@ test("Reader: TTS params persist to localStorage and refill on remount", async (
     const raw = window.localStorage.getItem("tts-params:x");
     expect(raw).toBeTruthy();
     expect(JSON.parse(raw!)).toMatchObject({ rate: 30 });
+  });
+});
+
+// ---------- longform target_chapters: creation form + runtime config ----------
+
+test("Projects: create with planned total submits target_chapters in payload", async () => {
+  const fetchMock = stubFetchFor({ projects: [] });
+  renderPage(<Projects />, "/");
+
+  fireEvent.click(screen.getByText("新建项目"));
+  fireEvent.change(await screen.findByTestId("project-name-input"), {
+    target: { value: "beta" },
+  });
+  const target = await screen.findByTestId("project-target-input");
+  fireEvent.change(target, { target: { value: "660" } });
+  fireEvent.click(screen.getByTestId("create-submit"));
+  await waitFor(() => {
+    const call = fetchMock.mock.calls.find(
+      (c) => String(c[0]) === "/api/projects" && (c[1] as RequestInit).method === "POST",
+    );
+    expect(JSON.parse(String((call![1] as RequestInit).body))).toEqual({
+      name: "beta",
+      genre: "fantasy",
+      target_chapters: 660,
+    });
+  });
+});
+
+test("Generate: longform control loads config and saves target_chapters", async () => {
+  const fetchMock = stubFetchFor({ config: { target_chapters: 660 } });
+  renderPage(<Generate />, "/p/:name/generate");
+
+  const input = (await screen.findByDisplayValue("660")) as HTMLInputElement;
+  expect(input).toBeInTheDocument();
+  fireEvent.change(input, { target: { value: "300" } });
+  fireEvent.click(screen.getByTestId("save-target-chapters"));
+  await waitFor(() => {
+    const call = fetchMock.mock.calls.find(
+      (c) => String(c[0]) === "/api/projects/x/config" && (c[1] as RequestInit).method === "PUT",
+    );
+    expect(call).toBeTruthy();
+    expect(JSON.parse(String((call![1] as RequestInit).body))).toEqual({
+      target_chapters: 300,
+    });
   });
 });

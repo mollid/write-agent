@@ -3,7 +3,15 @@ import { App as AntApp, Alert, Button, Card, InputNumber, Progress, Space, Tag, 
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiError } from "../api/client";
-import { useCancelJob, useMode, useOutline, useStatus, useWriteChapters } from "../api/hooks";
+import {
+  useCancelJob,
+  useMode,
+  useOutline,
+  useProjectConfig,
+  useStatus,
+  useUpdateProjectConfig,
+  useWriteChapters,
+} from "../api/hooks";
 import { useEvents } from "../stores/events";
 import { STAGE_NAMES } from "../constants";
 
@@ -25,7 +33,28 @@ export default function Generate() {
   const lastStart = useEvents((s) => s.lastChapterStart);
   const write = useWriteChapters(name);
   const cancel = useCancelJob(name);
+  const { data: config } = useProjectConfig(name);
+  const saveConfig = useUpdateProjectConfig(name);
   const [n, setN] = useState(1);
+  const [target, setTarget] = useState<number | null>(null);
+  const targetLoaded = useRef(false);
+  useEffect(() => {
+    if (!targetLoaded.current && config) {
+      targetLoaded.current = true;
+      setTarget(config.target_chapters);
+    }
+  }, [config]);
+
+  async function saveTarget() {
+    try {
+      await saveConfig.mutateAsync({ target_chapters: target });
+      message.success(
+        target ? `已保存：全书计划 ${target} 章` : "已清除全书章数（回到短篇一次性大纲）",
+      );
+    } catch (e) {
+      message.error(String(e instanceof Error ? e.message : e));
+    }
+  }
 
   const existing = status?.chapters.length ?? 0;
   const titles = new Map<number, string>();
@@ -109,7 +138,13 @@ export default function Generate() {
           已有 {existing} 章；本次将生成 {n} 章（含自动跳过的已完成章节）
         </Typography.Paragraph>
         <Space wrap>
-          <InputNumber min={1} max={2000} value={n} onChange={(v) => setN(v ?? 1)} />
+          <InputNumber
+            min={1}
+            max={2000}
+            value={n}
+            onChange={(v) => setN(v ?? 1)}
+            data-testid="n-input"
+          />
           <Button type="primary" data-testid="start-generate" loading={write.isPending} onClick={start}>
             开始生成
           </Button>
@@ -123,6 +158,29 @@ export default function Generate() {
             取消任务
           </Button>
         </Space>
+      </Card>
+
+      <Card size="small" title="长篇设置">
+        <Space wrap>
+          <InputNumber
+            min={1}
+            max={5000}
+            value={target ?? undefined}
+            onChange={(v) => setTarget(v ?? null)}
+            data-testid="target-chapters-input"
+            placeholder="留空 = 短篇一次性大纲"
+          />
+          <Button
+            data-testid="save-target-chapters"
+            loading={saveConfig.isPending}
+            onClick={saveTarget}
+          >
+            保存全书章数
+          </Button>
+        </Space>
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 8 }}>
+          填写后大纲走两段式：先生成全书卷骨架、只细化第一卷，写作中自动逐卷细化。请在生成大纲之前设置。
+        </Typography.Paragraph>
       </Card>
 
       {progress || lastStage ? (

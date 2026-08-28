@@ -329,3 +329,21 @@ def test_put_conflicts_with_active_job(client):
         "logline": "L2", "genre": "g", "tone": "t", "target_length_words": 1, "audience": "a"})
     assert r.status_code == 409
     assert client.get(f"/api/jobs/{job_id}").json()["gates"]  # still parked
+
+
+def test_bible_put_characters_snapshots_previous_roster(client, tmp_path):
+    """Manual roster replacement via PUT leaves a recoverable snapshot under
+    .meta/bible_versions/ — settings overwrites are never silent again."""
+    client.post("/api/projects", json={"name": "vb"})
+    _seed(client)
+    first = [{"id": "c1", "slug": "ara", "name": "Ara", "role": "protagonist",
+              "backstory": "b", "motivation": "m", "arc": "a"}]
+    assert client.put("/api/projects/vb/bible/characters", json=first).status_code == 200
+    replaced = [{"id": "c1", "slug": "ara", "name": "Ara-v2", "role": "protagonist",
+                 "backstory": "b", "motivation": "m", "arc": "a"}]
+    assert client.put("/api/projects/vb/bible/characters", json=replaced).status_code == 200
+    import json as _json
+    backups = list((tmp_path / "vb" / ".meta" / "bible_versions").glob("characters-*.json"))
+    assert len(backups) == 1
+    roster = _json.loads(backups[0].read_text(encoding="utf-8"))
+    assert roster[0]["name"] == "Ara"

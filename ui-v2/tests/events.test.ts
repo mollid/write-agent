@@ -248,3 +248,12 @@ describe("describe() log lines", () => {
     expect(describeEvent({ type: "whatever", job_id: "j" })).toBeNull();
   });
 });
+
+test("describeEvent covers arc_cast seeding events", () => {
+  expect(describeEvent({ type: "arc_cast_done", arc: "卷二", names: ["玛拉", "陶"], job_id: "j" }))
+    .toContain("玛拉");
+  expect(describeEvent({ type: "arc_cast_done", arc: "卷二", names: ["玛拉", "陶"], job_id: "j" }))
+    .toContain("卷二");
+  expect(describeEvent({ type: "arc_cast_denied", arc: "卷二", count: 2, job_id: "j" }))
+    .toContain("卷二");
+});
