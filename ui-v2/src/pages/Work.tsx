@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Button, Card, Empty, Input, List, Space, Tag, Typography } from "antd";
+import { App as AntApp, Button, Card, Empty, Input, List, Space, Tag, Typography } from "antd";
 import { Link } from "react-router-dom";
 import {
   useChatEntries,
@@ -16,6 +16,10 @@ export default function Work() {
   const { name = "" } = useParams();
   const [sid, setSid] = useState<string | null>(null);
   const [text, setText] = useState("");
+  /** 最新一轮回复,标记它属于哪个会话:只在对应会话渲染,服务端会话记录
+   * (已含该回复)刷新进来后自动隐藏,防止重复。 */
+  const [pendingReply, setPendingReply] = useState<{ sid: string; reply: string } | null>(null);
+  const { message } = AntApp.useApp();
   const sessions = useChatSessions(name);
   const createSession = useCreateChatSession(name);
   const entries = useChatEntries(name, sid);
@@ -25,11 +29,37 @@ export default function Work() {
     if (!sid && (sessions.data?.length ?? 0) > 0) setSid(sessions.data![0].id);
   }, [sessions.data, sid]);
 
+  // 切换会话时丢弃旧会话的待同步回复
+  useEffect(() => {
+    setPendingReply(null);
+  }, [sid]);
+
+  // 当前会话的服务端条目已包含该回复 → 不再单独渲染
+  useEffect(() => {
+    if (
+      pendingReply &&
+      pendingReply.sid === sid &&
+      (entries.data?.entries ?? []).some(
+        (e) => e.type === "assistant" && e.text === pendingReply.reply,
+      )
+    )
+      setPendingReply(null);
+  }, [entries.data, pendingReply, sid]);
+
+  const errMsg = (e: unknown) => String(e instanceof Error ? e.message : e);
+
   const doSend = () => {
     const t = text.trim();
     if (!t || !sid || send.isPending) return;
     setText("");
-    send.mutate(t);
+    send.mutate(t, {
+      // 用发送时捕获的 sid 标记回复归属,防止串到别的会话
+      onSuccess: (d) => setPendingReply({ sid, reply: d.reply }),
+      onError: (e) => {
+        setText(t); // 发送失败:还原输入,用户的文字不丢
+        message.error(`发送失败：${errMsg(e)}`);
+      },
+    });
   };
 
   return (
@@ -39,7 +69,10 @@ export default function Work() {
       </Typography.Title>
       <Card size="small" title="会话" extra={
         <Button size="small" loading={createSession.isPending}
-                onClick={() => createSession.mutate(undefined, { onSuccess: (d) => setSid(d.session_id) })}>
+                onClick={() => createSession.mutate(undefined, {
+                  onSuccess: (d) => setSid(d.session_id),
+                  onError: (e) => message.error(`新建会话失败：${errMsg(e)}`),
+                })}>
           新建会话
         </Button>
       }>
@@ -87,12 +120,8 @@ export default function Work() {
                 return <Typography.Text type="secondary" style={{ fontSize: 12 }}>{e.text}</Typography.Text>;
               }}
             />
-            {/* 最新一轮回复先从 mutation 结果渲染,避免等 refetch;当服务端
-             * 会话记录(含该回复)刷新进来后自动隐藏,防止重复。 */}
-            {send.data && !(entries.data?.entries ?? []).some(
-              (e) => e.type === "assistant" && e.text === send.data!.reply,
-            ) ? (
-              <Typography.Paragraph>{send.data.reply}</Typography.Paragraph>
+            {pendingReply && pendingReply.sid === sid ? (
+              <Typography.Paragraph>{pendingReply.reply}</Typography.Paragraph>
             ) : null}
           </div>
         )}
